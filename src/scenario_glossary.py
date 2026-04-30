@@ -13,7 +13,7 @@ _labs_base: Optional[list] = None
 
 def _load_from_file(filepath: str, source_label: str) -> list:
     if not os.path.exists(filepath):
-        print(f"⚠️ Файл не найден: {filepath}")
+        print(f"Файл не найден: {filepath}")
         return []
     with open(filepath, encoding="utf-8") as f:
         data = json.load(f)
