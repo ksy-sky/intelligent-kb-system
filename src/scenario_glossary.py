@@ -43,19 +43,32 @@ def load_labs_base() -> list:
 def load_all() -> list:
     return load_knowledge_base() + load_labs_base()
 
+def resolve_id(value: str) -> str:
+    import re
+    if re.match(r"^C(?:L)?\d{2,4}$", value.strip()):
+        entry = find_entry_by_label(value.strip())
+        if entry:
+            return entry.get("term", value)
+    return value
+
 def find_entry_by_label(term: str, source: str = "all") -> Optional[dict]:
     normalized = normalize_text(term)
+    
     if source == "theory":
         pool = load_knowledge_base()
     elif source == "labs":
         pool = load_labs_base()
     else:
         pool = load_all()
+
     for entry in pool:
+        # Поиск по названию термина
         if normalize_text(entry.get("term", "")) == normalized:
             return entry
+        # Поиск по concept_id
+        if entry.get("concept_id", "").lower() == normalized:
+            return entry
     return None
-
 def get_similar_terms(term: str, n: int = 5, source: str = "all") -> list:
     if source == "theory":
         pool = load_knowledge_base()
@@ -67,8 +80,21 @@ def get_similar_terms(term: str, n: int = 5, source: str = "all") -> list:
     return get_close_matches(term, all_terms, n=n, cutoff=0.4)
 
 def search_term(term: str, source: str = "all") -> dict:
+    if not term or not term.strip():
+        return {
+            "found": False,
+            "term": term,
+            "message": "Введён пустой запрос.",
+            "similar_terms": [],
+        }
+
     entry = find_entry_by_label(term, source=source)
+
     if entry:
+        resolved_relations = {}
+        for rel_type, targets in entry.get("relations", {}).items():
+            resolved_relations[rel_type] = [resolve_id(t) for t in targets]
+
         return {
             "found": True,
             "term": entry.get("term"),
@@ -77,7 +103,7 @@ def search_term(term: str, source: str = "all") -> dict:
             "topic_title": entry.get("topic_title"),
             "source": entry.get("source"),
             "definition": entry.get("definition", "Определение отсутствует."),
-            "relations": entry.get("relations", {}),
+            "relations": resolved_relations,
             "examples": entry.get("examples", []),
         }
     else:
