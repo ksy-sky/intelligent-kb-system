@@ -1,8 +1,11 @@
 import json
 import os
+import re
 from difflib import get_close_matches
 from typing import Optional
-from src.utils import normalize_text
+
+def normalize_text(text: str) -> str:
+    return re.sub(r'\s+', ' ', text.strip().lower())
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 KB_PATH_THEORY = os.path.join(BASE_DIR, "data", "glossary.json")
@@ -12,6 +15,7 @@ _knowledge_base: Optional[list] = None
 _labs_base: Optional[list] = None
 
 def _load_from_file(filepath: str, source_label: str) -> list:
+    """Читает JSON-файл и возвращает плоский список концептов."""
     if not os.path.exists(filepath):
         print(f"Файл не найден: {filepath}")
         return []
@@ -20,7 +24,6 @@ def _load_from_file(filepath: str, source_label: str) -> list:
     concepts = []
     for topic in data.get("topics", []):
         topic_title = topic.get("title", "")
-        topic_id = topic.get("topic_id", "")
         for concept in topic.get("concepts", []):
             concept = dict(concept)
             concept["topic_title"] = topic_title
@@ -28,11 +31,13 @@ def _load_from_file(filepath: str, source_label: str) -> list:
             concepts.append(concept)
     return concepts
 
+
 def load_knowledge_base() -> list:
     global _knowledge_base
     if _knowledge_base is None:
         _knowledge_base = _load_from_file(KB_PATH_THEORY, "theory")
     return _knowledge_base
+
 
 def load_labs_base() -> list:
     global _labs_base
@@ -40,20 +45,14 @@ def load_labs_base() -> list:
         _labs_base = _load_from_file(KB_PATH_LABS, "labs")
     return _labs_base
 
+
 def load_all() -> list:
     return load_knowledge_base() + load_labs_base()
 
-def resolve_id(value: str) -> str:
-    import re
-    if re.match(r"^C(?:L)?\d{2,4}$", value.strip()):
-        entry = find_entry_by_label(value.strip())
-        if entry:
-            return entry.get("term", value)
-    return value
-
 def find_entry_by_label(term: str, source: str = "all") -> Optional[dict]:
+   
     normalized = normalize_text(term)
-    
+
     if source == "theory":
         pool = load_knowledge_base()
     elif source == "labs":
@@ -62,14 +61,24 @@ def find_entry_by_label(term: str, source: str = "all") -> Optional[dict]:
         pool = load_all()
 
     for entry in pool:
-        # Поиск по названию термина
         if normalize_text(entry.get("term", "")) == normalized:
             return entry
-        # Поиск по concept_id
         if entry.get("concept_id", "").lower() == normalized:
             return entry
     return None
+
+
+def resolve_id(value: str) -> str:
+
+    if re.match(r"^C(?:L)?\d{2,4}$", value.strip()):
+        entry = find_entry_by_label(value.strip())
+        if entry:
+            return entry.get("term", value)
+    return value
+
+
 def get_similar_terms(term: str, n: int = 5, source: str = "all") -> list:
+
     if source == "theory":
         pool = load_knowledge_base()
     elif source == "labs":
@@ -80,6 +89,7 @@ def get_similar_terms(term: str, n: int = 5, source: str = "all") -> list:
     return get_close_matches(term, all_terms, n=n, cutoff=0.4)
 
 def search_term(term: str, source: str = "all") -> dict:
+   
     if not term or not term.strip():
         return {
             "found": False,
@@ -116,6 +126,7 @@ def search_term(term: str, source: str = "all") -> dict:
         }
 
 def get_all_terms(source: str = "all") -> list:
+
     if source == "theory":
         pool = load_knowledge_base()
     elif source == "labs":
@@ -124,15 +135,19 @@ def get_all_terms(source: str = "all") -> list:
         pool = load_all()
     return sorted({entry.get("term", "") for entry in pool if entry.get("term")})
 
+
 def get_terms_by_topic(topic_id: str) -> list:
+
     return [
         entry for entry in load_all()
         if entry.get("topic_id") == topic_id
     ]
 
+
 def get_stats() -> dict:
+
     theory = load_knowledge_base()
-    labs = load_labs_base()
+    labs   = load_labs_base()
     return {
         "theory_concepts": len(theory),
         "labs_concepts": len(labs),
