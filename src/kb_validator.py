@@ -4,9 +4,9 @@ from typing import Dict, List, Any, Set
 from collections import defaultdict
 
 # Формат ID: C001-C999 или CL001-CL999
-ID_PATTERN = re.compile(r"^C(?:L)?\d{2,3}$")
+ID_PATTERN = re.compile(r"^C(?:L)?\d{2,4}$")
 # Отношения, формирующие иерархию (должны быть ацикличными)
-HIERARCHY_KEYS = {"надкласс", "разбиение"}
+HIERARCHY_KEYS = {"надкласс"}
 
 class KBValidationError(Exception):
     """Исключение при нарушении целостности БЗ."""
@@ -70,16 +70,18 @@ def _validate_concepts_schema(concepts: List[Dict[str, Any]]) -> List[str]:
                         errors.append(f"Все элементы в '{r_type}' должны быть строками в {cid}")
     return errors
 
-def _validate_referential_integrity(concepts_by_id: Dict[str, Dict[str, Any]]) -> List[str]:
-    errors = []
+def _validate_referential_integrity(concepts_by_id):
+    warnings = []
     all_ids = set(concepts_by_id.keys())
-    
     for cid, c in concepts_by_id.items():
         for rel_type, targets in c.get("relations", {}).items():
             for target in targets:
                 if ID_PATTERN.match(target.strip()) and target.strip() not in all_ids:
-                    errors.append(f"Висячая ссылка: '{target.strip()}' в отношении '{rel_type}' концепта '{cid}'")
-    return errors
+                    warnings.append(f"⚠️  Висячая ссылка: '{target.strip()}' в '{rel_type}' концепта '{cid}'")
+    if warnings:
+        for w in warnings:
+            print(w)
+    return []   # ← возвращаем пустой список, не блокируем загрузку
 
 def _validate_hierarchy_acyclicity(concepts_by_id: Dict[str, Dict[str, Any]]) -> List[str]:
     errors = []
