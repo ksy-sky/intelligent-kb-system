@@ -170,23 +170,20 @@ class TestGlossaryModule:
         assert stats["theory_concepts"] == 3
         assert stats["labs_concepts"] == 2
         assert stats["total"] == 5
-        assert stats["theory_topics"] == 2  # T01, T02
-        assert stats["labs_topics"] == 1    # L01
+        assert stats["theory_topics"] == 2  
+        assert stats["labs_topics"] == 1    
 
     def test_load_knowledge_base_caching(self):
-        """Проверка кэширования загрузки (повторный вызов не читает файл)."""
-        with patch('src.scenario_glossary._load_from_file', return_value=[]) as mock_load:
-            load_knowledge_base()
-            load_knowledge_base()
-            load_knowledge_base()
-            mock_load.assert_called_once()
-
+        """Повторный вызов возвращает те же данные (кэш работает)."""
+        result1 = load_knowledge_base()
+        result2 = load_knowledge_base()
+        assert result1 is result2  
+    
     def test_load_labs_base_caching(self):
-        """Аналогично для лабораторных работ."""
-        with patch('src.scenario_glossary._load_from_file', return_value=[]) as mock_load:
-            load_labs_base()
-            load_labs_base()
-            mock_load.assert_called_once()
+        """Повторный вызов возвращает те же данные (кэш работает)."""
+        result1 = load_labs_base()
+        result2 = load_labs_base()
+        assert result1 is result2
 
     def test_load_all_combines_sources(self):
         """load_all объединяет теорию и лабы."""

@@ -17,8 +17,29 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from src.kb_loader import KnowledgeBaseLoader
 from src.scenario_glossary import search_term
 
+# ================= ЗАГРУЗКА И ВАЛИДАЦИЯ БЗ =================
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+KB_FILES = [
+    os.path.join(BASE_DIR, "data", "glossary.json"),
+    os.path.join(BASE_DIR, "data", "glossary_labs.json"),
+]
+
+def init_knowledge_base() -> bool:
+    """Загружает и валидирует базу знаний при старте системы."""
+    try:
+        loader = KnowledgeBaseLoader(KB_FILES)
+        summary = loader.load()
+        print(f"База знаний загружена: {summary['concepts_count']} концептов, "
+              f"{summary['topics_count']} разделов.")
+        return True
+    except Exception as e:
+        print(f" Ошибка загрузки базы знаний: {e}")
+        return False
+    
 def print_separator(title: str = ""):
     line = "=" * 55
     if title:
@@ -127,6 +148,11 @@ def print_menu():
 
 
 def main():
+    # Инициализация БЗ при старте
+    if not init_knowledge_base():
+        print("  Система не может быть запущена без базы знаний.")
+        return
+
     scenarios = {
         "1": run_scenario1,
         "2": run_scenario2,
