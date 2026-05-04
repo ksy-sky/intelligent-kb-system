@@ -120,16 +120,9 @@ def run_scenario2(loader: KnowledgeBaseLoader):
 # СЦЕНАРИЙ 3 — Работа с интеллектуальным ассистентом
 # =================================================================
 
-def run_scenario3(loader: KnowledgeBaseLoader):
-    """
-    TODO (Человек 3 — scenario_assistant.py):
-        from src.scenario_assistant import AssistantScenario
-        scenario = AssistantScenario(loader)
-        Реализуй обработку запросов на естественном языке.
-    """
-    print("\n  [Сценарий 3] Интеллектуальный ассистент")
-    print("  ⚠️  Модуль в разработке (scenario_assistant.py)")
-    input("\n  Нажмите Enter для возврата в меню...")
+def run_scenario3():
+    from src.scenario_assistant import run_scenario3_assistant
+    run_scenario3_assistant()  
 
 
 # =================================================================
