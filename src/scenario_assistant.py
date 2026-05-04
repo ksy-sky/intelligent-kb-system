@@ -2,23 +2,57 @@
 """
 Модуль интеллектуального ассистента с использованием LLM через Ollama.
 """
-
-import re
 import json
 import os
-import subprocess
+import re 
 from typing import Dict, List, Any, Optional
 from difflib import get_close_matches
 import ollama
+import subprocess
+from src.scenario_glossary import normalize_text
+# ========== ФУНКЦИИ ЗАГРУЗКИ (взяты из старого scenario_glossary) ==========
 
-from .scenario_glossary import (
-    load_all,
-    load_knowledge_base,
-    load_labs_base,
-    get_similar_terms,
-    normalize_text,
-    resolve_id
-)
+def _load_json_file(filepath: str, source_label: str) -> list:
+    """Читает JSON-файл и возвращает плоский список концептов."""
+    if not os.path.exists(filepath):
+        print(f"Файл не найден: {filepath}")
+        return []
+    with open(filepath, encoding="utf-8") as f:
+        data = json.load(f)
+    concepts = []
+    for topic in data.get("topics", []):
+        topic_title = topic.get("title", "")
+        for concept in topic.get("concepts", []):
+            concept = dict(concept)
+            concept["topic_title"] = topic_title
+            concept["source"] = source_label
+            concepts.append(concept)
+    return concepts
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+KB_PATH_THEORY = os.path.join(BASE_DIR, "data", "glossary.json")
+KB_PATH_LABS = os.path.join(BASE_DIR, "data", "glossary_labs.json")
+
+def load_knowledge_base() -> list:
+    return _load_json_file(KB_PATH_THEORY, "theory")
+
+def load_labs_base() -> list:
+    return _load_json_file(KB_PATH_LABS, "labs")
+
+def load_all() -> list:
+    return load_knowledge_base() + load_labs_base()
+
+def resolve_id(value: str) -> str:
+    """Преобразует ID концепта в его термин."""
+    if re.match(r"^C(?:L)?\d{2,4}$", value.strip()):
+        all_concepts = load_all()
+        for c in all_concepts:
+            if c.get("concept_id") == value.strip():
+                return c.get("term", value)
+    return value
+
+# ========== КОНЕЦ ФУНКЦИЙ ЗАГРУЗКИ ==========
+
 
 MODEL_NAME = "llama3.2"
 
@@ -104,7 +138,7 @@ class IntelligentAssistant:
         
         # Поиск по ID
         term_upper = term.strip().upper()
-        if re.match(r'^C(L)?\d+$', term_upper):
+        if re.match(r'^C(?:L)?\d{2,4}$', term_upper):
             if term_upper in self._ids_index:
                 return [self._ids_index[term_upper]]
         
@@ -166,7 +200,7 @@ class IntelligentAssistant:
             for word in words:
                 if len(word) < 4 or word in stop_words:
                     continue
-                similar = get_similar_terms(word, n=2, source="all")
+                similar = get_close_matches(normalize_text(word), list(self._terms_index.keys()), n=2, cutoff=0.6)
                 for s in similar:
                     concepts = self._find_concepts(s)
                     for concept in concepts:

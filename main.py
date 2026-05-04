@@ -120,7 +120,7 @@ def run_scenario2(loader: KnowledgeBaseLoader):
 # СЦЕНАРИЙ 3 — Работа с интеллектуальным ассистентом
 # =================================================================
 
-def run_scenario3():
+def run_scenario3(loader: KnowledgeBaseLoader = None):
     from src.scenario_assistant import run_scenario3_assistant
     run_scenario3_assistant()  
 
