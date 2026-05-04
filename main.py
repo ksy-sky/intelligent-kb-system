@@ -75,15 +75,32 @@ def show_glossary_result(result: dict):
 # =================================================================
 
 def run_scenario1(loader: KnowledgeBaseLoader):
-    """
-    TODO (Человек 2 — scenario_study.py):
-        from src.scenario_study import StudyScenario
-        scenario = StudyScenario(loader)
-        Реализуй интерактивный просмотр теоретического материала по разделам.
-    """
-    print("\n  [Сценарий 1] Самостоятельное изучение материала")
-    print("  ⚠️  Модуль в разработке (scenario_study.py)")
-    input("\n  Нажмите Enter для возврата в меню...")
+    """Интерактивный просмотр теоретического материала по разделам."""
+    from src.scenario_study import StudyScenario
+    
+    scenario = StudyScenario(loader)
+
+    print("\n" + "=" * 55)
+    print("  СЦЕНАРИЙ 1: САМОСТОЯТЕЛЬНОЕ ИЗУЧЕНИЕ МАТЕРИАЛА")
+    print("=" * 55)
+    print("  - Введите ID раздела (T01..T07, L01..L05) — список понятий")
+    print("  - Введите термин или ID концепта (C001) — карточка")
+    print("  - 'q' — возврат в меню\n")
+
+    while True:
+        try:
+            user_input = input("Запрос: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            break
+
+        if not user_input:
+            continue
+        if user_input.lower() in ("q", "quit", "выход", "exit"):
+            print("\n  Возврат в меню...\n")
+            break
+
+        response = scenario.handle_query(user_input)
+        print(response)
 
 
 # =================================================================

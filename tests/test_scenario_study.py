@@ -183,16 +183,27 @@ class TestStudyModule:
     # ========================================================================
     # Форматирование ответа (_build_response)
     # ========================================================================
+        # ========================================================================
+    # Форматирование ответа (_build_response)
+    # ========================================================================
     def test_build_response_hierarchy(self):
-        """Формирование ответа включает иерархию (надкласс/подкласс)."""
+        """Формирование ответа включает иерархию (надкласс/подкласс/разбиение)."""
         concept = self.MOCK_CONCEPTS["C002"]
         response = self.scenario._build_response(concept)
         assert "Иерархия:" in response
         assert "Надкласс: Технология" in response
 
-    def test_build_response_other_relations(self):
-        """Формирование ответа включает другие связи (разбиение, части)."""
+    def test_build_response_hierarchy_with_breakdown(self):
+        """Формирование ответа включает разбиение в разделе иерархии."""
         concept = self.MOCK_CONCEPTS["C001"]
         response = self.scenario._build_response(concept)
-        assert "Связи:" in response
+        assert "Иерархия:" in response
         assert "Разбиение: Информационная технология" in response
+
+    def test_build_response_other_relations(self):
+        """Формирование ответа включает другие связи (используется в, противопоставляется)."""
+        # C003 имеет связь "используется в", которая не входит в иерархию
+        concept = self.MOCK_CONCEPTS["C003"]
+        response = self.scenario._build_response(concept)
+        assert "Связи:" in response
+        assert "Используется в: C150" in response
