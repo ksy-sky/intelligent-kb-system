@@ -37,11 +37,6 @@ class GlossaryScenario:
     def _get_pool_by_source(self, source: str) -> List[Dict[str, Any]]:
         """Возвращает список концептов в зависимости от источника."""
         if source == "theory":
-            # В loader нет прямого метода get_theory_list, но мы можем 
-            # отфильтровать по topic_id или использовать все концепты, 
-            # так как поиск по термину в loader уже быстрый.
-            # Для простоты используем все концепты из индекса loader, 
-            # так как search_by_term и так быстр.
             return list(self.loader.concepts_by_id.values())
         elif source == "labs":
             return list(self.loader.concepts_by_id.values())
@@ -60,30 +55,23 @@ class GlossaryScenario:
             if concept:
                 return self._enrich_concept(concept)
 
-        # 2. Поиск по термину (через индекс лоадера)
-        # loader.search_by_term возвращает список, так как термины могут повторяться в разных темах
         candidates = self.loader.search_by_term(normalized)
         
         if candidates:
-            # Если источник ограничен, фильтруем
             if source != "all":
                 for c in candidates:
                     tid = c.get("topic_id", "")
-                    # Простая эвристика: Txx - theory, Lxx - labs
                     is_theory = tid.startswith("T")
                     if (source == "theory" and is_theory) or (source == "labs" and not is_theory):
                         return self._enrich_concept(c)
-                # Если не нашли в нужном источнике, возвращаем None
                 return None
             
-            # Возвращаем первый найденный
             return self._enrich_concept(candidates[0])
 
         return None
 
     def _enrich_concept(self, concept: Dict[str, Any]) -> Dict[str, Any]:
         """Добавляет вычисляемые поля (topic_title, source) к концепту."""
-        # Копируем, чтобы не мутировать данные в лоадере
         enriched = dict(concept)
         
         tid = enriched.get("topic_id", "")
@@ -97,11 +85,8 @@ class GlossaryScenario:
 
     def get_similar_terms(self, term: str, n: int = 5, source: str = "all") -> List[str]:
         """Нечёткий поиск похожих терминов."""
-        # Берем все термины из индекса лоадера
         all_terms = list(self.loader.concepts_by_term.keys())
         
-        # Фильтрация по источнику (опционально, для ускорения можно не делать, 
-        # так как difflib быстр на небольших объемах)
         if source != "all":
             filtered_terms = []
             for t in all_terms:
@@ -130,7 +115,6 @@ class GlossaryScenario:
         entry = self.find_entry_by_label(term, source=source)
 
         if entry:
-            # Разрешаем связи (ID -> Термин)
             resolved_relations = {}
             raw_relations = entry.get("relations", {})
             for rel_type, targets in raw_relations.items():
