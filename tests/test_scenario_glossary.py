@@ -3,13 +3,11 @@ from unittest.mock import MagicMock, patch
 import sys
 import os
 
-# Добавляем корень проекта в путь
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from src.scenario_glossary import GlossaryScenario, normalize_text
 from src.kb_loader import KnowledgeBaseLoader
 
-# Моковые данные для тестов (имитация структуры JSON)
 MOCK_THEORY = [
     {"concept_id": "C001", "term": "Технология", "topic_id": "T01", "source": "theory",
      "definition": "Совокупность методов.", "relations": {"разбиение": ["C002"]}, "examples": []},
@@ -30,10 +28,7 @@ class TestGlossaryUnit(unittest.TestCase):
 
     def setUp(self):
         """Настройка перед каждым тестом: создание мока лоадера и сценария."""
-        # Создаем мок объекта KnowledgeBaseLoader
         self.mock_loader = MagicMock(spec=KnowledgeBaseLoader)
-        
-        # Настраиваем поведение методов лоадера
         all_concepts = MOCK_THEORY + MOCK_LABS
         
         def get_concept_side_effect(cid):
@@ -59,7 +54,6 @@ class TestGlossaryUnit(unittest.TestCase):
         for c in all_concepts:
             self.mock_loader.concepts_by_term.setdefault(c["term"].lower(), []).append(c)
 
-        # Создаем экземпляр сценария с мокированным лоадером
         self.scenario = GlossaryScenario(self.mock_loader)
 
     # 1. Утилиты
@@ -110,7 +104,6 @@ class TestGlossaryUnit(unittest.TestCase):
         result = self.scenario.search_term("Технологи", source="theory")
         self.assertFalse(result["found"])
         self.assertGreater(len(result["similar_terms"]), 0)
-        # Проверяем наличие термина независимо от регистра, так как индекс хранит термины в lower()
         self.assertTrue(any("технология" in t.lower() for t in result["similar_terms"]))
 
     def test_fuzzy_search_no_match(self):
@@ -128,7 +121,6 @@ class TestGlossaryUnit(unittest.TestCase):
             for item in result["relations"]["разбиение"]:
                 # В моках C002 -> "Информационная технология"
                 self.assertIsInstance(item, str)
-                # Проверка, что ID не остался в виде строки "C..."
                 self.assertFalse(item.startswith("C"), f"ID не был разрешён в термин: {item}")
 
     # 10. Фильтрация по источнику
@@ -149,7 +141,7 @@ class TestGlossaryUnit(unittest.TestCase):
         """Статистика должна содержать ключевые метрики."""
         stats = self.scenario.get_stats()
         self.assertIn("total", stats)
-        self.assertEqual(stats["total"], 5)  # 3 theory + 2 labs
+        self.assertEqual(stats["total"], 5) 
         self.assertEqual(stats["theory_concepts"], 3)
         self.assertEqual(stats["labs_concepts"], 2)
 
