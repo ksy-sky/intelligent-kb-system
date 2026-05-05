@@ -77,7 +77,7 @@ def _validate_referential_integrity(concepts_by_id):
         for rel_type, targets in c.get("relations", {}).items():
             for target in targets:
                 if ID_PATTERN.match(target.strip()) and target.strip() not in all_ids:
-                    warnings.append(f"⚠️  Висячая ссылка: '{target.strip()}' в '{rel_type}' концепта '{cid}'")
+                    warnings.append(f" Висячая ссылка: '{target.strip()}' в '{rel_type}' концепта '{cid}'")
     if warnings:
         for w in warnings:
             print(w)
