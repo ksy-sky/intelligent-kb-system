@@ -1,18 +1,19 @@
 # tests/test_scenario_study.py
-import pytest
+import unittest
 import os
 import sys
 from unittest.mock import patch
 
+# Добавляем корень проекта в sys.path для корректных импортов
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from src.scenario_study import StudyScenario
 
 
-class TestStudyModule:
-    """Полный набор Unit-тестов для модуля изучения материала (Сценарий 1)."""
+class TestStudyModule(unittest.TestCase):
+    """Unit-тесты для Сценария 1 на стандартной библиотеке unittest."""
 
-    # Моковые данные, имитирующие внутреннее состояние KnowledgeBaseLoader
+    # Моковые данные, имитирующие состояние KnowledgeBaseLoader
     MOCK_CONCEPTS = {
         "C001": {"concept_id": "C001", "term": "Технология", "topic_id": "T01", "definition": "Совокупность методов.", "relations": {"разбиение": ["C002"]}, "examples": []},
         "C002": {"concept_id": "C002", "term": "Информационная технология", "topic_id": "T01", "definition": "Обработка данных.", "relations": {"надкласс": ["C001"]}, "examples": ["IT"]},
@@ -27,7 +28,7 @@ class TestStudyModule:
     }
 
     class MockLoader:
-        """Имитация KnowledgeBaseLoader для полной изоляции тестов."""
+        """Имитация KnowledgeBaseLoader для изоляции тестов."""
         def __init__(self):
             self.concepts_by_id = TestStudyModule.MOCK_CONCEPTS
 
@@ -59,140 +60,130 @@ class TestStudyModule:
             resolved["relations"] = resolved_relations
             return resolved
 
-    @pytest.fixture(autouse=True)
-    def setup_scenario(self):
-        """Автоматически создаёт экземпляр StudyScenario с моковым загрузчиком."""
+    def setUp(self):
+        """Вызывается перед каждым тестом (аналог pytest.fixture)."""
         self.loader = self.MockLoader()
         self.scenario = StudyScenario(self.loader)
-        yield
 
     # ========================================================================
     # Вспомогательные методы
     # ========================================================================
     def test_normalize_text(self):
-        """Нормализация: trim, lower, замена множественных пробелов."""
-        assert self.scenario._normalize("  JSON  ") == "json"
-        assert self.scenario._normalize("Технология") == "технология"
-        assert self.scenario._normalize("Test   String") == "test string"
-        assert self.scenario._normalize("  C001  ") == "c001"
+        self.assertEqual(self.scenario._normalize("  JSON  "), "json")
+        self.assertEqual(self.scenario._normalize("Технология"), "технология")
+        self.assertEqual(self.scenario._normalize("Test   String"), "test string")
+        self.assertEqual(self.scenario._normalize("  C001  "), "c001")
 
     def test_detect_query_type_topic_id(self):
-        """Определение типа запроса: ID раздела (T01, L02 и т.д.)."""
-        assert self.scenario._detect_query_type("T01") == "topic"
-        assert self.scenario._detect_query_type("  l05  ") == "topic"
-        assert self.scenario._detect_query_type("T99") == "topic"
+        self.assertEqual(self.scenario._detect_query_type("T01"), "topic")
+        self.assertEqual(self.scenario._detect_query_type("  l05  "), "topic")
+        self.assertEqual(self.scenario._detect_query_type("T99"), "topic")
 
     def test_detect_query_type_term(self):
-        """Определение типа запроса: обычный термин или ID концепта."""
-        assert self.scenario._detect_query_type("Онтология") == "term"
-        assert self.scenario._detect_query_type("C001") == "term"
-        assert self.scenario._detect_query_type("JSON формат") == "term"
+        self.assertEqual(self.scenario._detect_query_type("Онтология"), "term")
+        self.assertEqual(self.scenario._detect_query_type("C001"), "term")
+        self.assertEqual(self.scenario._detect_query_type("JSON формат"), "term")
 
     # ========================================================================
     # Поиск записей (_find_entry)
     # ========================================================================
     def test_find_entry_by_concept_id(self):
-        """Поиск записи по ID концепта."""
         entry = self.scenario._find_entry("C001")
-        assert entry is not None
-        assert entry["concept_id"] == "C001"
-        assert entry["term"] == "Технология"
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry["concept_id"], "C001")
+        self.assertEqual(entry["term"], "Технология")
 
     def test_find_entry_by_term(self):
-        """Поиск записи по названию термина."""
         entry = self.scenario._find_entry("Онтология")
-        assert entry is not None
-        assert entry["concept_id"] == "C003"
-        assert entry["definition"] == "Формальная спецификация."
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry["concept_id"], "C003")
+        self.assertEqual(entry["definition"], "Формальная спецификация.")
 
     def test_find_entry_case_insensitive(self):
-        """Поиск термина регистронезависим."""
         entry = self.scenario._find_entry("технология")
-        assert entry is not None
-        assert entry["concept_id"] == "C001"
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry["concept_id"], "C001")
 
     def test_find_entry_not_found(self):
-        """Возврат None при отсутствии термина."""
-        assert self.scenario._find_entry("НесуществующийТермин") is None
+        self.assertIsNone(self.scenario._find_entry("НесуществующийТермин"))
 
     def test_find_entry_with_suggestions(self):
-        """При опечатке возвращает словарь с подсказками."""
         with patch('src.scenario_study.get_close_matches', return_value=["Технология"]):
             entry = self.scenario._find_entry("Технологи")
-            assert entry is not None
-            assert "_suggestions" in entry
-            assert "Технология" in entry["_suggestions"]
+            self.assertIsNotNone(entry)
+            self.assertIn("_suggestions", entry)
+            self.assertIn("Технология", entry["_suggestions"])
 
     # ========================================================================
     # Основной обработчик (handle_query)
     # ========================================================================
     def test_handle_query_topic(self):
-        """Обработка запроса ID раздела: возврат списка понятий."""
         result = self.scenario.handle_query("T01")
-        assert "Раздел T01: Основы" in result
-        assert "Всего понятий: 2" in result
-        assert "Технология" in result
-        assert "Информационная технология" in result
+        self.assertIn("Раздел T01: Основы", result)
+        self.assertIn("Всего понятий: 2", result)
+        self.assertIn("Технология", result)
+        self.assertIn("Информационная технология", result)
 
     def test_handle_query_topic_not_found(self):
-        """Обработка несуществующего ID раздела."""
         result = self.scenario.handle_query("T99")
-        assert "не найден" in result
+        self.assertIn("не найден", result)
 
     def test_handle_query_term_success(self):
-        """Обработка запроса термина: возврат карточки с разрешёнными связями."""
         result = self.scenario.handle_query("Онтология")
-        assert "Понятие: Онтология" in result
-        assert "Определение: Формальная спецификация." in result
-        assert "Используется в: C150" in result
+        self.assertIn("Понятие: Онтология", result)
+        self.assertIn("Определение: Формальная спецификация.", result)
+        self.assertIn("Используется в: C150", result)
 
     def test_handle_query_with_examples(self):
-        """Карточка термина содержит примеры, если они есть."""
         result = self.scenario.handle_query("Информационная технология")
-        assert "Примеры:" in result
-        assert "IT" in result
+        self.assertIn("Примеры:", result)
+        self.assertIn("IT", result)
 
     def test_handle_query_empty(self):
-        """Обработка пустого ввода."""
         result = self.scenario.handle_query("")
-        assert "Введите запрос." in result
+        self.assertIn("Введите запрос.", result)
 
     def test_handle_query_whitespace_only(self):
-        """Обработка ввода только из пробелов."""
         result = self.scenario.handle_query("   ")
-        assert "Введите запрос." in result
+        self.assertIn("Введите запрос.", result)
 
     def test_handle_query_not_found(self):
-        """Сообщение об отсутствии термина в базе."""
         result = self.scenario.handle_query("НесуществующийТермин")
-        assert "не найден в базе знаний" in result
+        self.assertIn("не найден в базе знаний", result)
 
     def test_handle_query_suggestions(self):
-        """При опечатке предлагает похожие термины."""
         with patch('src.scenario_study.get_close_matches', return_value=["Технология"]):
             result = self.scenario.handle_query("Технологи")
-            assert "Точного совпадения для 'Технологи' нет." in result
-            assert "Возможно, вы имели в виду: Технология" in result
+            self.assertIn("Точного совпадения для 'Технологи' нет.", result)
+            self.assertIn("Возможно, вы имели в виду: Технология", result)
 
     def test_concept_id_vs_term_in_handle_query(self):
-        """C001 определяется как term, но находится по ID благодаря _find_entry."""
         result = self.scenario.handle_query("C001")
-        assert "Понятие: Технология" in result
-        assert "ID: C001" in result
+        self.assertIn("Понятие: Технология", result)
+        self.assertIn("ID: C001", result)
 
     # ========================================================================
     # Форматирование ответа (_build_response)
     # ========================================================================
     def test_build_response_hierarchy(self):
-        """Формирование ответа включает иерархию (надкласс/подкласс)."""
         concept = self.MOCK_CONCEPTS["C002"]
         response = self.scenario._build_response(concept)
-        assert "Иерархия:" in response
-        assert "Надкласс: Технология" in response
+        self.assertIn("Иерархия:", response)
+        self.assertIn("Надкласс: Технология", response)
 
-    def test_build_response_other_relations(self):
-        """Формирование ответа включает другие связи (разбиение, части)."""
+    def test_build_response_hierarchy_with_breakdown(self):
         concept = self.MOCK_CONCEPTS["C001"]
         response = self.scenario._build_response(concept)
-        assert "Связи:" in response
-        assert "Разбиение: Информационная технология" in response
+        self.assertIn("Иерархия:", response)
+        self.assertIn("Разбиение: Информационная технология", response)
+
+    def test_build_response_other_relations(self):
+        # C003 имеет связь "используется в", которая попадает в раздел "Связи:"
+        concept = self.MOCK_CONCEPTS["C003"]
+        response = self.scenario._build_response(concept)
+        self.assertIn("Связи:", response)
+        self.assertIn("Используется в: C150", response)
+
+
+if __name__ == "__main__":
+    unittest.main()
