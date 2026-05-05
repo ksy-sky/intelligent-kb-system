@@ -119,6 +119,7 @@ class IntelligentAssistant:
 
         if use_llm:
             try:
+                import ollama  # Проверяем доступность
                 result = subprocess.run(
                     ["ollama", "list"], capture_output=True, text=True, timeout=5
                 )
@@ -132,7 +133,7 @@ class IntelligentAssistant:
                 self.use_llm = False
         else:
             self.use_llm = False
-
+            
     def _build_indexes(self):
         """Построение индексов терминов."""
         self._terms_index.clear()
