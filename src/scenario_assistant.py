@@ -9,58 +9,17 @@ from typing import Dict, List, Any, Optional
 from difflib import get_close_matches
 import ollama
 import subprocess
+
+from src.kb_loader import KnowledgeBaseLoader
 from src.scenario_glossary import normalize_text
 
-# ========== ФУНКЦИИ ЗАГРУЗКИ (взяты из старого scenario_glossary) ==========
-
-
-def _load_json_file(filepath: str, source_label: str) -> list:
-    """Читает JSON-файл и возвращает плоский список концептов."""
-    if not os.path.exists(filepath):
-        print(f"Файл не найден: {filepath}")
-        return []
-    with open(filepath, encoding="utf-8") as f:
-        data = json.load(f)
-    concepts = []
-    for topic in data.get("topics", []):
-        topic_title = topic.get("title", "")
-        for concept in topic.get("concepts", []):
-            concept = dict(concept)
-            concept["topic_title"] = topic_title
-            concept["source"] = source_label
-            concepts.append(concept)
-    return concepts
-
+# конфигурация
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-KB_PATH_THEORY = os.path.join(BASE_DIR, "data", "glossary.json")
-KB_PATH_LABS = os.path.join(BASE_DIR, "data", "glossary_labs.json")
-
-
-def load_knowledge_base() -> list:
-    return _load_json_file(KB_PATH_THEORY, "theory")
-
-
-def load_labs_base() -> list:
-    return _load_json_file(KB_PATH_LABS, "labs")
-
-
-def load_all() -> list:
-    return load_knowledge_base() + load_labs_base()
-
-
-def resolve_id(value: str) -> str:
-    """Преобразует ID концепта в его термин."""
-    if re.match(r"^C(?:L)?\d{2,4}$", value.strip()):
-        all_concepts = load_all()
-        for c in all_concepts:
-            if c.get("concept_id") == value.strip():
-                return c.get("term", value)
-    return value
-
-
-# ========== КОНЕЦ ФУНКЦИЙ ЗАГРУЗКИ ==========
-
+KB_FILES = [
+    os.path.join(BASE_DIR, "data", "glossary.json"),
+    os.path.join(BASE_DIR, "data", "glossary_labs.json"),
+]
 
 MODEL_NAME = "llama3.2"
 
@@ -87,6 +46,65 @@ SYSTEM_PROMPT = """Ты - интеллектуальный ассистент п
 Типы: "definition", "relations", "classification", "comparison", "examples", "general", "error"
 
 поле "message" должно содержать полный, грамотный ответ на русском языке."""
+
+_loader: Optional[KnowledgeBaseLoader] = None
+
+
+def _get_loader() -> KnowledgeBaseLoader:
+    """Возвращает синглтон загрузчика базы знаний."""
+    global _loader
+    if _loader is None:
+        _loader = KnowledgeBaseLoader(KB_FILES)
+        _loader.load()
+    return _loader
+
+
+def load_knowledge_base() -> list:
+    """Загружает концепты из теории с добавлением source и topic_title."""
+    loader = _get_loader()
+    concepts = []
+    for tid, topic in loader.topics_index.items():
+        for cid in topic["concept_ids"]:
+            c = loader.get_concept(cid)
+            if c:
+                c = dict(c)
+                c["topic_title"] = topic["title"]
+                c["source"] = "theory"
+                concepts.append(c)
+    return concepts
+
+
+def load_labs_base() -> list:
+    """Загружает концепты из лабораторных с добавлением source и topic_title."""
+    loader = _get_loader()
+    concepts = []
+    for tid, topic in loader.topics_index.items():
+        for cid in topic["concept_ids"]:
+            c = loader.get_concept(cid)
+            if c:
+                c = dict(c)
+                c["topic_title"] = topic["title"]
+                c["source"] = "labs"
+                concepts.append(c)
+    return concepts
+
+
+def load_all() -> list:
+    """Загружает все концепты."""
+    return load_knowledge_base() + load_labs_base()
+
+
+def resolve_id(value: str) -> str:
+    """Преобразует ID концепта в его термин."""
+    if re.match(r"^C(?:L)?\d{2,4}$", value.strip()):
+        loader = _get_loader()
+        concept = loader.get_concept(value.strip())
+        if concept:
+            return concept.get("term", value)
+    return value
+
+
+# сам класс ассистента
 
 
 class IntelligentAssistant:
@@ -137,17 +155,14 @@ class IntelligentAssistant:
         """Поиск всех концептов по термину или ID."""
         normalized = normalize_text(term)
 
-        # Точное совпадение термина
         if normalized in self._terms_index:
             return self._terms_index[normalized]
 
-        # Поиск по ID
         term_upper = term.strip().upper()
         if re.match(r"^C(?:L)?\d{2,4}$", term_upper):
             if term_upper in self._ids_index:
                 return [self._ids_index[term_upper]]
 
-        # Нечёткий поиск
         if len(term) >= 4:
             all_terms = list(self._terms_index.keys())
             similar = get_close_matches(normalized, all_terms, n=1, cutoff=0.75)
@@ -230,7 +245,6 @@ class IntelligentAssistant:
             "применяется",
         }
 
-        # имщем фразы (от длинных к коротким)
         for phrase_len in range(min(5, len(words)), 1, -1):
             for i in range(len(words) - phrase_len + 1):
                 phrase = " ".join(words[i : i + phrase_len])
@@ -244,7 +258,6 @@ class IntelligentAssistant:
                         relevant.append(concept)
                         seen.add(concept["term"])
 
-        #  отдельные слова
         if not relevant:
             for word in words:
                 if len(word) < 3 or word in stop_words:
@@ -255,7 +268,6 @@ class IntelligentAssistant:
                         relevant.append(concept)
                         seen.add(concept["term"])
 
-        # нечеткий поиск
         if not relevant:
             for word in words:
                 if len(word) < 4 or word in stop_words:
@@ -316,7 +328,6 @@ class IntelligentAssistant:
 
         question_lower = question.lower()
 
-        #  тип вопроса
         if any(
             w in question_lower
             for w in [
@@ -420,8 +431,8 @@ class IntelligentAssistant:
                 prompt=prompt,
                 format="json",
                 options={
-                    "temperature": 0.2,  # Ещё ниже для точности
-                    "num_predict": 600,  # Больше токенов для длинных ответов
+                    "temperature": 0.2,
+                    "num_predict": 600,
                     "top_p": 0.9,
                 },
             )
@@ -443,7 +454,7 @@ class IntelligentAssistant:
             result["success"] = True
             return result
 
-        except Exception as e:
+        except Exception:
             return self._fallback_search(question, concepts)
 
     def _fallback_search(self, question: str, concepts: List[Dict]) -> Dict[str, Any]:
@@ -490,7 +501,7 @@ class IntelligentAssistant:
             "type": "definition",
             "term": c["term"],
             "definition": definition,
-            "message": f"{c['term']} -  {definition}",
+            "message": f"{c['term']} - это {definition}",
         }
 
     def process_question(self, question: str) -> Dict[str, Any]:
@@ -505,7 +516,6 @@ class IntelligentAssistant:
         question = question.strip()
         question_lower = question.lower()
 
-        # Отвлечённые вопросы
         general_words = [
             "как дела",
             "привет",
@@ -523,10 +533,8 @@ class IntelligentAssistant:
                     "message": "Здравствуйте! Я — интеллектуальный ассистент по дисциплине ПиОИвИС. Буду рад ответить на ваши вопросы по теме дисциплины!",
                 }
 
-        # Ищем термины
         concepts = self._search_relevant_info(question)
 
-        # Типы вопросов, которые можно обработать локально
         need_definition = any(
             w in question_lower
             for w in ["что такое", "определение", "объясни", "кто такой", "что значит"]
@@ -568,7 +576,6 @@ class IntelligentAssistant:
             for w in ["надкласс", "родитель", "что шире", "что включает"]
         )
 
-        # Если есть термины и это простой вопрос — отвечаем локально
         if concepts and any(
             [
                 need_definition,
@@ -666,11 +673,9 @@ class IntelligentAssistant:
                             + "\n".join(f"• {item}" for item in merged_relations[key]),
                         }
 
-        # все остальное  отправляем в LLM
         if self.use_llm:
             return self._ask_llm(question, concepts if concepts else [])
 
-        # если нет LLM - fallback
         if concepts:
             term_name = concepts[0]["term"]
             all_concepts = self._find_concepts(term_name)
