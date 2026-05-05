@@ -1,7 +1,5 @@
-# tests/test_scenario_assistant.py
 """
 Unit-тесты для модуля интеллектуального ассистента (Сценарий 3).
-Тестирует поиск определений, связей, классификаций, примеров и т.д.
 """
 
 import unittest
@@ -11,7 +9,7 @@ from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-# Тестовые данные — копия реальной структуры из glossary_labs.json
+# копия реальной структуры из glossary_labs.json
 MOCK_KNOWLEDGE_BASE = [
     {
         "concept_id": "CL001",
@@ -290,13 +288,13 @@ class TestProcessQuestion(unittest.TestCase):
     def test_unknown_term(self):
         """Неизвестный термин."""
         response = self.assistant.process_question("что такое квантовая_запутанность_xyz?")
-        # Может вернуть False (не найдено) или попытаться через LLM
+        # может вернуть False (не найдено) или попытаться через LLM
         self.assertIn("success", response)
     
     def test_syntax_question(self):
         """Вопрос про синтаксис."""
         response = self.assistant.process_question("какой синтаксис обратная ссылка?")
-        # Должен найти термин и либо показать определение, либо отправить в LLM
+        # должен найти термин и либо показать определение, либо отправить в LLM
         self.assertIn("success", response)
 
 
@@ -410,7 +408,7 @@ class TestRelationMerging(unittest.TestCase):
     
     def test_merge_definitions(self):
         """Определение берётся из первого источника."""
-        # В мок-данных у метасимвола есть definition
+
         concepts = self.assistant._find_concepts("метасимвол")
         self.assertGreater(len(concepts), 0)
         self.assertTrue(any(c.get("definition") for c in concepts))
