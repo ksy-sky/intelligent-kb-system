@@ -45,7 +45,6 @@ def clean_latex(text: str) -> str:
     """Удаляет LaTeX-разметку, оставляет чистый текст."""
     if not text:
         return ""
-    # 🔥 ВАЖНО: обратный слеш в regex всегда удваивается, иначе re ломается на \u, \t, \s
     text = re.sub(r'\\textbf\{([^}]*)\}', r'\1', text)
     text = re.sub(r'\\textit\{([^}]*)\}', r'\1', text)
     text = re.sub(r'\\uline\{([^}]*)\}', r'\1', text)
@@ -214,7 +213,7 @@ def build_glossary(file_map: dict[str, tuple[str, str]]) -> dict:
     
     for fp, (tid, tname) in file_map.items():
         if not os.path.exists(fp):
-            print(f"⚠️ Файл не найден: {fp}")
+            print(f" Файл не найден: {fp}")
             continue
         raw = parse_tex_file(fp)
         merged = {}
@@ -309,5 +308,5 @@ if __name__ == "__main__":
     total = sum(len(t["concepts"]) for t in result["topics"])
     with open("glossary.json", "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
-    print(f"✅ Готово! Сформировано {total} записей понятий по {len(result['topics'])} темам.")
-    print("💾 Файл сохранён: glossary.json")
+    print(f"Готово! Сформировано {total} записей понятий по {len(result['topics'])} темам.")
+    print("Файл сохранён: glossary.json")

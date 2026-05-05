@@ -24,8 +24,18 @@ from src.scenario_glossary import GlossaryScenario
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 KB_FILES = [
-    os.path.join(BASE_DIR, "data", "glossary.json"),
-    os.path.join(BASE_DIR, "data", "glossary_labs.json"),
+    os.path.join(BASE_DIR, "data", "glossary_T01.json"),
+    os.path.join(BASE_DIR, "data", "glossary_T02.json"),
+    os.path.join(BASE_DIR, "data", "glossary_T03.json"),
+    os.path.join(BASE_DIR, "data", "glossary_T04.json"),
+    os.path.join(BASE_DIR, "data", "glossary_T05.json"),
+    os.path.join(BASE_DIR, "data", "glossary_T06.json"),
+    os.path.join(BASE_DIR, "data", "glossary_T07.json"),
+    os.path.join(BASE_DIR, "data", "glossary_labs_t1.json"),
+    os.path.join(BASE_DIR, "data", "glossary_labs_t2.json"),
+    os.path.join(BASE_DIR, "data", "glossary_labs_t3.json"),
+    os.path.join(BASE_DIR, "data", "glossary_labs_t4.json"),
+    os.path.join(BASE_DIR, "data", "glossary_labs_t5.json"),
 ]
 
 
