@@ -6,7 +6,6 @@ import os
 import re
 from typing import Dict, List, Any, Optional
 from difflib import get_close_matches
-import ollama
 import subprocess
 
 from src.kb_loader import KnowledgeBaseLoader
@@ -322,6 +321,7 @@ class IntelligentAssistant:
 
     def _ask_llm(self, question: str, concepts: List[Dict]) -> Dict[str, Any]:
         """Отправляет запрос к LLM."""
+        import ollama
         context = self._build_context(concepts)
 
         question_lower = question.lower()
