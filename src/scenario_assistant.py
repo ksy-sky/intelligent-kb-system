@@ -43,7 +43,7 @@ SYSTEM_PROMPT = """Ты - интеллектуальный ассистент п
 
 ВАЖНОЕ ПРАВИЛО:
 Если вопрос пользователя не связан с темами: информатика, информационные технологии, базы данных, онтологии, программирование, структуры данных, кодирование, форматы данных, Semantic Web, компьютерные науки - ответь строго:
-"Извините, я специализируюсь только на вопросах по дисциплине ПиОИвИС. Задайте вопрос по теме информатики или информационных технологий."
+"Извините, я специализируюсь только на вопросах по дисциплине ПиОИвИС. Задайте вопрос по теме информационных технологий."
 
 Формат ответа - JSON:
 {
@@ -325,17 +325,13 @@ class IntelligentAssistant:
     def _ask_llm(self, question: str, concepts: List[Dict]) -> Dict[str, Any]:
         """Отправляет запрос к LLM с проверкой тематики."""
         import ollama
-    
-    # ================================================================
-    # ЭТАП 1: проверка, относится ли вопрос к дисциплине
-    # ================================================================
-    
-    # Если термин нашёлся в базе знаний — пропускаем без проверки
+
+        #  термин нашёлся в базе знаний — пропускаем без проверки
         if concepts:
-            # Термин есть в БЗ, значит вопрос точно по дисциплине
+            #  есть в БЗ, значит вопрос точно по дисциплине
             pass
         else:
-            # Термина нет в БЗ — спрашиваем LLM, относится ли вопрос к дисциплине
+            #  нет в БЗ — спрашиваем LLM, относится ли вопрос к дисциплине
             guard_prompt = f"""Твоя задача — определить, относится ли вопрос студента к дисциплине "ПиОИвИС" (Представление и обработка информации в интеллектуальных системах).
 
     Дисциплина охватывает ТОЛЬКО следующие темы:
@@ -353,7 +349,7 @@ class IntelligentAssistant:
     - табличные процессоры
     - электронные таблицы
     Если в вопросе нет НИ ОДНОГО термина из этих тем — ответь "НЕТ".
-    Если вопрос про людей, животных, еду, погоду, спорт, музыку — ответь "НЕТ".
+    Если вопрос про людей, животных, еду, погоду, спорт, музыку, квантовую механику, физику — ответь "НЕТ".
     Если вопрос бессмысленный или содержит выдуманные слова — ответь "НЕТ".
 
     Вопрос: "{question}"
@@ -362,7 +358,6 @@ class IntelligentAssistant:
     Если не относится — ответь СТРОГО "НЕТ".
 
     Не пиши ничего кроме "ДА" или "НЕТ"."""
-
 
             try:
                 guard_response = ollama.generate(
@@ -376,7 +371,7 @@ class IntelligentAssistant:
                 guard_text = guard_response.get("response", "").strip().upper()
             except Exception:
                 guard_text = "НЕТ"
-            
+
             if not guard_text.startswith("Д"):
                 return {
                     "success": True,
@@ -385,12 +380,9 @@ class IntelligentAssistant:
                         "Извините, я специализируюсь только на вопросах по дисциплине "
                         "ПиОИвИС. Задайте вопрос по теме информатики или информационных "
                         "технологий."
-                    )
+                    ),
                 }
-    
-        # ================================================================
-        # ЭТАП 2: ответ по контексту
-        # ================================================================
+
         context = self._build_context(concepts)
         question_lower = question.lower()
 
@@ -429,7 +421,7 @@ class IntelligentAssistant:
             prompt = (
                 f"Ты — ассистент по дисциплине ПиОИвИС.\n"
                 f"Отвечай СТРОГО по контексту, приведённому ниже.\n"
-                f"Если в контексте есть определение — выведи его ТОЧНО КАК В КОНТЕКСТЕ, слово в слово.\n"
+                f"Если в контексте есть определение — выведи его ТОЧНО КАК В КОНТЕКСТЕ, слово в слово, преимущественно бери определение из теории.\n"
                 f"НИЧЕГО не меняй в формулировке определения.\n"
                 f"Если в контексте нет определения — скажи, что не нашёл его в базе знаний.\n\n"
                 f"Контекст из базы знаний ПиОИвИС:\n\n{context}\n\n"
@@ -480,14 +472,13 @@ class IntelligentAssistant:
 
         elif any(w in question_lower for w in ["пример", "примеры", "приведи"]):
             prompt = (
-                base_instruction +
-                f"Контекст из базы знаний ПиОИвИС:\n\n{context}\n\n"
+                base_instruction + f"Контекст из базы знаний ПиОИвИС:\n\n{context}\n\n"
                 f"Вопрос студента: {question}\n\n"
                 "ВАЖНО: найди в контексте термин, который ТОЧНО соответствует вопросу.\n"
                 "Если вопрос про ЛИНЕЙНЫЕ структуры — не используй данные про НЕЛИНЕЙНЫЕ.\n"
                 "Приведи примеры из контекста, можешь пояснить их своими словами.\n"
                 "Если в контексте нет примеров для конкретно этого термина — скажи об этом.\n"
-                "Ответь в JSON: {\"success\": true, \"type\": \"examples\", \"message\": \"твой ответ\"}"
+                'Ответь в JSON: {"success": true, "type": "examples", "message": "твой ответ"}'
             )
 
         else:
@@ -610,46 +601,134 @@ class IntelligentAssistant:
 
         concepts = self._search_relevant_info(question)
 
-        need_definition = any(
-            w in question_lower
-            for w in ["что такое", "определение", "объясни", "кто такой", "что значит"]
+        question_words_list = question_lower.split()
+        has_what_is = False
+        for i in range(len(question_words_list) - 1):
+            pair = f"{question_words_list[i]} {question_words_list[i+1]}"
+            if get_close_matches(pair, ["что такое"], n=1, cutoff=0.7):
+                has_what_is = True
+                break
+
+        need_definition = (
+            any(
+                w in question_lower
+                for w in ["определение", "объясни", "кто такой", "что значит"]
+            )
+            or has_what_is
         )
-        need_composition = any(
-            w in question_lower
-            for w in [
-                "состоит",
-                "состав",
-                "компонент",
-                "части",
-                "из чего",
-                "что входит",
-                "что содержит",
-            ]
+
+        # Проверка "состоит из" и "состав" с учётом опечаток
+        has_composition = False
+        for i in range(len(question_words_list) - 1):
+            pair = f"{question_words_list[i]} {question_words_list[i+1]}"
+            if get_close_matches(pair, ["состоит из", "из чего"], n=1, cutoff=0.7):
+                has_composition = True
+                break
+
+        need_composition = (
+            any(
+                w in question_lower
+                for w in [
+                    "состоит",
+                    "состав",
+                    "компонент",
+                    "части",
+                    "из чего",
+                    "что входит",
+                    "что содержит",
+                ]
+            )
+            or has_composition
         )
+
+        # Проверка одиночных слов с опечатками ("состаф" -> "состав")
+        if not need_composition:
+            for word in question_words_list:
+                if get_close_matches(
+                    word, ["состав", "состоит", "компоненты", "части"], n=1, cutoff=0.75
+                ):
+                    need_composition = True
+                    break
+
         need_usage = any(
             w in question_lower
             for w in ["используется", "применяется", "где", "для чего"]
         )
-        need_classification = any(
-            w in question_lower
-            for w in [
-                "виды",
-                "типы",
-                "классификац",
-                "разбиение",
-                "какие бывают",
-                "на что делится",
-                "перечисли",
-                "какие есть",
-            ]
+        if not need_usage:
+            for word in question_words_list:
+                if get_close_matches(
+                    word,
+                    ["используется", "применяется", "используют", "применяют"],
+                    n=1,
+                    cutoff=0.75,
+                ):
+                    need_usage = True
+                    break
+
+        # Проверка классификации с учётом опечаток
+        has_classification_phrase = False
+        for i in range(len(question_words_list) - 1):
+            pair = f"{question_words_list[i]} {question_words_list[i+1]}"
+            if get_close_matches(
+                pair, ["какие бывают", "на что делится", "какие есть"], n=1, cutoff=0.7
+            ):
+                has_classification_phrase = True
+                break
+
+        need_classification = (
+            any(
+                w in question_lower
+                for w in ["виды", "типы", "классификац", "разбиение", "перечисли"]
+            )
+            or has_classification_phrase
         )
+
+        if not need_classification:
+            for word in question_words_list:
+                if get_close_matches(
+                    word,
+                    ["виды", "типы", "классификация", "разбиение", "перечисли"],
+                    n=1,
+                    cutoff=0.75,
+                ):
+                    need_classification = True
+                    break
+
+        # Проверка примеров с учётом опечаток
         need_examples = any(
             w in question_lower for w in ["пример", "примеры", "приведи"]
         )
-        need_hierarchy = any(
-            w in question_lower
-            for w in ["надкласс", "родитель", "что шире", "что включает"]
+        if not need_examples:
+            for word in question_words_list:
+                if get_close_matches(
+                    word, ["пример", "примеры", "приведи", "покажи"], n=1, cutoff=0.75
+                ):
+                    need_examples = True
+                    break
+
+        # Проверка иерархии с учётом опечаток
+        has_hierarchy_phrase = False
+        for i in range(len(question_words_list) - 1):
+            pair = f"{question_words_list[i]} {question_words_list[i+1]}"
+            if get_close_matches(pair, ["что шире", "что включает"], n=1, cutoff=0.7):
+                has_hierarchy_phrase = True
+                break
+
+        need_hierarchy = (
+            any(w in question_lower for w in ["надкласс", "родитель"])
+            or has_hierarchy_phrase
         )
+
+        if not need_hierarchy:
+            for word in question_words_list:
+                if get_close_matches(
+                    word,
+                    ["надкласс", "родитель", "подкласс", "иерархия"],
+                    n=1,
+                    cutoff=0.75,
+                ):
+                    need_hierarchy = True
+                    break
 
         if concepts and any(
             [
@@ -661,21 +740,77 @@ class IntelligentAssistant:
                 need_hierarchy,
             ]
         ):
-                       # Выбираем наиболее релевантный термин
+            # Выбираем наиболее релевантный термин
             if len(concepts) > 1:
                 question_words = set(question_lower.split())
                 stop_words_local = {
-                    "что", "такое", "как", "чем", "где", "когда", "почему",
-                    "расскажи", "покажи", "объясни", "опиши", "найди", "дай",
-                    "и", "или", "в", "на", "с", "по", "к", "от", "для", "про",
-                    "о", "это", "не", "да", "нет", "бы", "же", "ли", "то",
-                    "пример", "примеры", "приведи", "перечисли", "какие",
-                    "существуют", "бывают", "есть", "можете", "назвать",
-                    "нужен", "нужна", "список", "состав", "компоненты",
-                    "отличие", "различие", "разница", "сравнение", "сравни",
-                    "используется", "применяется", "связан", "связи", "отношения",
-                    "состоит", "входят", "относится", "данных", "данные",
-                    "информации", "информация", "составные", "части", "надкласс",
+                    "что",
+                    "такое",
+                    "как",
+                    "чем",
+                    "где",
+                    "когда",
+                    "почему",
+                    "расскажи",
+                    "покажи",
+                    "объясни",
+                    "опиши",
+                    "найди",
+                    "дай",
+                    "и",
+                    "или",
+                    "в",
+                    "на",
+                    "с",
+                    "по",
+                    "к",
+                    "от",
+                    "для",
+                    "про",
+                    "о",
+                    "это",
+                    "не",
+                    "да",
+                    "нет",
+                    "бы",
+                    "же",
+                    "ли",
+                    "то",
+                    "пример",
+                    "примеры",
+                    "приведи",
+                    "перечисли",
+                    "какие",
+                    "существуют",
+                    "бывают",
+                    "есть",
+                    "можете",
+                    "назвать",
+                    "нужен",
+                    "нужна",
+                    "список",
+                    "состав",
+                    "компоненты",
+                    "отличие",
+                    "различие",
+                    "разница",
+                    "сравнение",
+                    "сравни",
+                    "используется",
+                    "применяется",
+                    "связан",
+                    "связи",
+                    "отношения",
+                    "состоит",
+                    "входят",
+                    "относится",
+                    "данных",
+                    "данные",
+                    "информации",
+                    "информация",
+                    "составные",
+                    "части",
+                    "надкласс",
                 }
                 meaningful = question_words - stop_words_local
 
@@ -693,7 +828,13 @@ class IntelligentAssistant:
                 term_name = concepts[0]["term"]
 
             all_concepts = self._find_concepts(term_name)
-
+            for c in self.theory_base:
+                if c.get("term", "").lower() == term_name.lower():
+                    if not any(
+                        ac.get("concept_id") == c.get("concept_id")
+                        for ac in all_concepts
+                    ):
+                        all_concepts.append(c)
             merged_relations = {}
             merged_examples = []
             merged_definition = ""
@@ -824,11 +965,12 @@ def run_scenario3_assistant():
     else:
         print("Режим: Локальный поиск (без ИИ)")
     print("\n Примеры вопросов:")
-    print("   • Что такое онтология?")
+    print("   • Что такое концептуализация?")
     print("   • Какие виды технологий существуют?")
     print("   • Чем отличается информация от данных?")
     print("   • Из чего состоит регулярное выражение?")
     print("   • Где используется онтология?")
+    print("   • Онтология - это?")
     print("\n Для выхода введите 'q'.\n")
 
     while True:
