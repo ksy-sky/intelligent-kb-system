@@ -1,15 +1,14 @@
 """
-main.py — точка входа интеллектуальной обучающей системы по дисциплине ПиОИвИС.
+main.py — точка входа интеллектуальной обучающей системы по дисциплине ПиОИвИС (5 семестр).
 
 Структура сценариев:
     Сценарий 1 — Самостоятельное изучение теоретического материала  (scenario_study.py)
-    Сценарий 2 — Использование глоссария                            (scenario_glossary.py) ✅
-    Сценарий 3 — Работа с интеллектуальным ассистентом              (scenario_assistant.py)
-
-Для добавления нового сценария:
-    1. Импортируй свой класс сценария
-    2. Создай экземпляр, передав loader
-    3. Вызови нужный метод в run_scenarioN()
+    Сценарий 2 — Использование глоссария                          (scenario_glossary.py)
+    Сценарий 3 — Работа с интеллектуальным ассистентом             (scenario_assistant.py)
+    Сценарий 4 — Адаптивная диагностика пробелов                   (solver_diagnostics.py)
+    Сценарий 5 — Построение траектории и рекомендации              (solver_trajectory.py)
+    Сценарий 6 — Семантический компаратор (LCA)                    (solver_comparator.py)
+    Сценарий 8 — Аналитика успеваемости для преподавателя          (solver_analytics.py)
 """
 
 import os
@@ -19,6 +18,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from src.kb_loader import KnowledgeBaseLoader
 from src.scenario_glossary import GlossaryScenario
+
+# Импорт новых решателей задач (5 семестр)
+from src.solver_diagnostics import get_missing_prerequisites
+from src.solver_trajectory import build_learning_plan
+from src.solver_comparator import find_lca
+from src.solver_analytics import analyze_group_gaps
 
 # ================= ПУТИ К ФАЙЛАМ =================
 
@@ -56,22 +61,22 @@ def print_separator(title: str = ""):
 def show_glossary_result(result: dict):
     """Форматированный вывод карточки термина (Сценарий 2)."""
     if result["found"]:
-        print(f"\n Термин:      «{result['term']}»")
-        print(f" ID:          {result['concept_id']}")
-        print(f" Topic ID:    {result['topic_id']}")
-        print(f" Раздел:      {result['topic_title']}")
+        print(f"\n Термин:     «{result['term']}»")
+        print(f" ID:         {result['concept_id']}")
+        print(f" Topic ID:   {result['topic_id']}")
+        print(f" Раздел:     {result['topic_title']}")
         source_label = "Теория" if result["source"] == "theory" else "Лабораторные"
-        print(f" Источник:    {source_label}")
+        print(f" Источник:   {source_label}")
         print(f" Определение: {result['definition']}")
 
         if result["relations"]:
             print("   Связи:")
             for rel_type, targets in result["relations"].items():
                 targets_str = ", ".join(str(t) for t in targets)
-                print(f"     • {rel_type}: {targets_str}")
+                print(f"      • {rel_type}: {targets_str}")
 
         if result["examples"]:
-            print(f" Пример:      {result['examples'][0]}")
+            print(f" Пример:     {result['examples'][0]}")
     else:
         print(f"\n Термин «{result['term']}» не найден в базе знаний.")
         if result.get("similar_terms"):
@@ -114,7 +119,7 @@ def run_scenario1(loader: KnowledgeBaseLoader):
 
 
 # =================================================================
-# СЦЕНАРИЙ 2 — Использование глоссария ✅
+# СЦЕНАРИЙ 2 — Использование глоссария
 # =================================================================
 
 def run_scenario2(loader: KnowledgeBaseLoader):
@@ -153,15 +158,90 @@ def run_scenario3(loader: KnowledgeBaseLoader = None):
 
 
 # =================================================================
+# СЦЕНАРИЙ 4 — Адаптивная диагностика пробелов (Дана)
+# =================================================================
+
+def run_scenario4(loader: KnowledgeBaseLoader):
+    print_separator("СЦЕНАРИЙ 4: АДАПТИВНАЯ ДИАГНОСТИКА ПРОБЕЛОВ")
+    target_id = input("Введите ID целевого концепта (например, C042): ").strip()
+    mastered_input = input("Введите ID освоенных концептов через запятую (например, C001, C002): ").strip()
+    mastered_ids = [m.strip() for m in mastered_input.split(",")] if mastered_input else []
+    
+    missing = get_missing_prerequisites(target_id, mastered_ids, loader)
+    print(f"\n Выявленные пробелы в знаниях для концепта {target_id}:")
+    print(missing if missing else "Пробелов нет, все пререквизиты освоены!")
+
+
+# =================================================================
+# СЦЕНАРИЙ 5 — Построение траектории и рекомендации (Аня)
+# =================================================================
+
+def run_scenario5(loader: KnowledgeBaseLoader):
+    print_separator("СЦЕНАРИЙ 5: ПЛАНИРОВЩИК И РЕКОМЕНДАЦИИ")
+    missing_input = input("Введите список проблемных ID через запятую (например, C010, C015): ").strip()
+    missing_ids = [m.strip() for m in missing_input.split(",")] if missing_input else []
+    
+    plan = build_learning_plan(missing_ids, loader)
+    print(f"\n Рекомендованный план изучения (топологическая сортировка):")
+    for idx, c_id in enumerate(plan, 1):
+        concept = loader.concepts_by_id.get(c_id, {})
+        term = concept.get("term", "Неизвестно")
+        topic = concept.get("topic_id", "")
+        print(f"  {idx}. [{c_id}] {term} (Раздел/Лаба: {topic})")
+
+
+# =================================================================
+# СЦЕНАРИЙ 6 — Семантический компаратор / LCA (Юля)
+# =================================================================
+
+def run_scenario6(loader: KnowledgeBaseLoader):
+    print_separator("СЦЕНАРИЙ 6: СЕМАНТИЧЕСКИЙ КОМПАРАТОР (LCA)")
+    id1 = input("Введите ID первого концепта (например, C040): ").strip()
+    id2 = input("Введите ID второго концепта (например, C042): ").strip()
+    
+    lca = find_lca(id1, id2, loader)
+    if lca:
+        lca_concept = loader.concepts_by_id.get(lca, {})
+        print(f"\n Ближайший общий предок (LCA): [{lca}] {lca_concept.get('term', '')}")
+    else:
+        print("\n Общий предок не найден.")
+
+
+# =================================================================
+# СЦЕНАРИЙ 8 — Аналитика для преподавателя (Ксюша)
+# =================================================================
+
+def run_scenario8(loader: KnowledgeBaseLoader):
+    print_separator("СЦЕНАРИЙ 8: АНАЛИТИКА УСПЕВАЕМОСТИ ГРУППЫ")
+    topic_id = input("Введите ID раздела для анализа (например, T07): ").strip()
+    # Демонстрационный набор данных по группе студентов
+    group_data = [
+        ["C001", "C002"],
+        ["C001"],
+        ["C001", "C002", "C003"]
+    ]
+    print(f"\n Анализ группы для темы {topic_id}...")
+    gaps = analyze_group_gaps(group_data, topic_id, loader)
+    print(" Статистика пропусков по концептам (чем больше, тем проблемнее):")
+    for c_id, count in gaps.items():
+        term = loader.concepts_by_id.get(c_id, {}).get("term", "")
+        print(f"  • [{c_id}] {term}: не освоили {count} студентов")
+
+
+# =================================================================
 # ГЛАВНОЕ МЕНЮ
 # =================================================================
 
 def print_menu():
-    print_separator("ИНТЕЛЛЕКТУАЛЬНАЯ ОБУЧАЮЩАЯ СИСТЕМА ПиОИвИС")
+    print_separator("ИНТЕЛЛЕКТУАЛЬНАЯ ОБУЧАЮЩАЯ СИСТЕМА ПиОИвИС (5 семестр)")
     print("  Выберите сценарий:\n")
-    print("  1 — Изучение теоретического материала")
-    print("  2 — Глоссарий (поиск термина)")
-    print("  3 — Интеллектуальный ассистент")
+    print("  1 — Изучение теоретического материала (Сема 4)")
+    print("  2 — Глоссарий / Поиск термина (Сема 4)")
+    print("  3 — Интеллектуальный ассистент (Сема 4)")
+    print("  4 — Адаптивная диагностика пробелов (Сема 5)")
+    print("  5 — Построение траектории и рекомендации (Сема 5)")
+    print("  6 — Семантический компаратор / LCA (Сема 5)")
+    print("  8 — Аналитика успеваемости для преподавателя (Сема 5)")
     print("  q — Выход\n")
 
 
@@ -181,6 +261,10 @@ def main():
         "1": lambda: run_scenario1(loader),
         "2": lambda: run_scenario2(loader),
         "3": lambda: run_scenario3(loader),
+        "4": lambda: run_scenario4(loader),
+        "5": lambda: run_scenario5(loader),
+        "6": lambda: run_scenario6(loader),
+        "8": lambda: run_scenario8(loader),
     }
 
     while True:
@@ -196,7 +280,7 @@ def main():
         elif choice in scenarios:
             scenarios[choice]()
         else:
-            print("\n  Неверный выбор. Введите 1, 2, 3 или q.\n")
+            print("\n  Неверный выбор. Введите 1-6, 8 или q.\n")
 
 
 if __name__ == "__main__":
