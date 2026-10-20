@@ -2,13 +2,14 @@
 main.py — точка входа интеллектуальной обучающей системы по дисциплине ПиОИвИС (5 семестр).
 
 Структура сценариев:
-    Сценарий 1 — Самостоятельное изучение теоретического материала  (scenario_study.py)
-    Сценарий 2 — Использование глоссария                          (scenario_glossary.py)
-    Сценарий 3 — Работа с интеллектуальным ассистентом             (scenario_assistant.py)
-    Сценарий 4 — Адаптивная диагностика пробелов                   (solver_diagnostics.py)
-    Сценарий 5 — Построение траектории и рекомендации              (solver_trajectory.py)
-    Сценарий 6 — Семантический компаратор (LCA)                    (solver_comparator.py)
-    Сценарий 8 — Аналитика успеваемости для преподавателя          (solver_analytics.py)
+    Сценарий 1 — Самостоятельное изучение теоретического материала  (scenario_study.py) [Студент]
+    Сценарий 2 — Использование глоссария                          (scenario_glossary.py) [Студент]
+    Сценарий 3 — Работа с интеллектуальным ассистентом             (scenario_assistant.py) [Студент]
+    Сценарий 4 — Адаптивная диагностика пробелов                   (solver_diagnostics.py) [Студент]
+    Сценарий 5 — Построение траектории и рекомендации              (solver_trajectory.py) [Студент]
+    Сценарий 6 — Семантический компаратор (LCA)                    (solver_comparator.py) [Студент]
+    Сценарий 7 — Администрирование и валидация базы знаний         (kb_validator.py)      [Преподаватель]
+    Сценарий 8 — Аналитика успеваемости и выявление пробелов       (solver_analytics.py)  [Преподаватель]
 """
 
 import os
@@ -18,6 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from src.kb_loader import KnowledgeBaseLoader
 from src.scenario_glossary import GlossaryScenario
+from src.kb_validator import KnowledgeBaseValidator  # Валидатор для сценария 7
 
 # Импорт новых решателей задач (5 семестр)
 from src.solver_diagnostics import get_missing_prerequisites
@@ -96,7 +98,7 @@ def run_scenario1(loader: KnowledgeBaseLoader):
     scenario = StudyScenario(loader)
 
     print("\n" + "=" * 55)
-    print("  СЦЕНАРИЙ 1: САМОСТОЯТЕЛЬНОЕ ИЗУЧЕНИЕ МАТЕРИАЛА")
+    print("  СЦЕНАРИЙ 1: САМОСТОЯТЕЛЬНОЕ ИЗУЧЕНИЕ МАТЕРИАЛА [Студент]")
     print("=" * 55)
     print("  - Введите ID раздела (T01..T07, L01..L05) — список понятий")
     print("  - Введите термин или ID концепта (C001) — карточка")
@@ -126,7 +128,7 @@ def run_scenario2(loader: KnowledgeBaseLoader):
     """Интерактивный поиск терминов в базе знаний дисциплины ПиОИвИС."""
     scenario = GlossaryScenario(loader)
 
-    print_separator("ГЛОССАРИЙ ПиОИвИС")
+    print_separator("ГЛОССАРИЙ ПиОИвИС [Студент]")
     print(" Введите термин или его ID (например: онтология / C158).")
     print(" Для выхода введите 'q'.\n")
 
@@ -162,7 +164,7 @@ def run_scenario3(loader: KnowledgeBaseLoader = None):
 # =================================================================
 
 def run_scenario4(loader: KnowledgeBaseLoader):
-    print_separator("СЦЕНАРИЙ 4: АДАПТИВНАЯ ДИАГНОСТИКА ПРОБЕЛОВ")
+    print_separator("СЦЕНАРИЙ 4: АДАПТИВНАЯ ДИАГНОСТИКА ПРОБЕЛОВ [Студент]")
     target_id = input("Введите ID целевого концепта (например, C042): ").strip()
     mastered_input = input("Введите ID освоенных концептов через запятую (например, C001, C002): ").strip()
     mastered_ids = [m.strip() for m in mastered_input.split(",")] if mastered_input else []
@@ -177,7 +179,7 @@ def run_scenario4(loader: KnowledgeBaseLoader):
 # =================================================================
 
 def run_scenario5(loader: KnowledgeBaseLoader):
-    print_separator("СЦЕНАРИЙ 5: ПЛАНИРОВЩИК И РЕКОМЕНДАЦИИ")
+    print_separator("СЦЕНАРИЙ 5: ПЛАНИРОВЩИК И РЕКОМЕНДАЦИИ [Студент]")
     missing_input = input("Введите список проблемных ID через запятую (например, C010, C015): ").strip()
     missing_ids = [m.strip() for m in missing_input.split(",")] if missing_input else []
     
@@ -195,7 +197,7 @@ def run_scenario5(loader: KnowledgeBaseLoader):
 # =================================================================
 
 def run_scenario6(loader: KnowledgeBaseLoader):
-    print_separator("СЦЕНАРИЙ 6: СЕМАНТИЧЕСКИЙ КОМПАРАТОР (LCA)")
+    print_separator("СЦЕНАРИЙ 6: СЕМАНТИЧЕСКИЙ КОМПАРАТОР (LCA) [Студент]")
     id1 = input("Введите ID первого концепта (например, C040): ").strip()
     id2 = input("Введите ID второго концепта (например, C042): ").strip()
     
@@ -208,11 +210,30 @@ def run_scenario6(loader: KnowledgeBaseLoader):
 
 
 # =================================================================
+# СЦЕНАРИЙ 7 — Администрирование и валидация БЗ (Преподаватель)
+# =================================================================
+
+def run_scenario7(loader: KnowledgeBaseLoader):
+    print_separator("СЦЕНАРИЙ 7: ВАЛИДАЦИЯ БАЗЫ ЗНАНИЙ [Преподаватель]")
+    print(" Запуск автоматической проверки целостности БЗ (уникальность ID, ссылки, ацикличность)...")
+    try:
+        # Используем валидатор для проверки загруженных файлов
+        validator = KnowledgeBaseValidator(KB_FILES)
+        is_valid = validator.validate()
+        if is_valid:
+            print("\n [УСПЕХ] База знаний полностью корректна! Ошибок и циклов не обнаружено.")
+        else:
+            print("\n [ВНИМАНИЕ] Валидация выявила нарушения в структуре базы знаний.")
+    except Exception as e:
+        print(f"\n Ошибка при выполнении валидации: {e}")
+
+
+# =================================================================
 # СЦЕНАРИЙ 8 — Аналитика для преподавателя (Ксюша)
 # =================================================================
 
 def run_scenario8(loader: KnowledgeBaseLoader):
-    print_separator("СЦЕНАРИЙ 8: АНАЛИТИКА УСПЕВАЕМОСТИ ГРУППЫ")
+    print_separator("СЦЕНАРИЙ 8: АНАЛИТИКА УСПЕВАЕМОСТИ ГРУППЫ [Преподаватель]")
     topic_id = input("Введите ID раздела для анализа (например, T07): ").strip()
     # Демонстрационный набор данных по группе студентов
     group_data = [
@@ -235,14 +256,17 @@ def run_scenario8(loader: KnowledgeBaseLoader):
 def print_menu():
     print_separator("ИНТЕЛЛЕКТУАЛЬНАЯ ОБУЧАЮЩАЯ СИСТЕМА ПиОИвИС (5 семестр)")
     print("  Выберите сценарий:\n")
-    print("  1 — Изучение теоретического материала (Сема 4)")
-    print("  2 — Глоссарий / Поиск термина (Сема 4)")
-    print("  3 — Интеллектуальный ассистент (Сема 4)")
-    print("  4 — Адаптивная диагностика пробелов (Сема 5)")
-    print("  5 — Построение траектории и рекомендации (Сема 5)")
-    print("  6 — Семантический компаратор / LCA (Сема 5)")
-    print("  8 — Аналитика успеваемости для преподавателя (Сема 5)")
-    print("  q — Выход\n")
+    print("  --- Функционал для Студента ---")
+    print("  1 — Изучение теоретического материала")
+    print("  2 — Глоссарий / Поиск термина")
+    print("  3 — Интеллектуальный ассистент")
+    print("  4 — Адаптивная диагностика пробелов")
+    print("  5 — Построение траектории и рекомендации")
+    print("  6 — Семантический компаратор / LCA")
+    print("\n  --- Функционал для Преподавателя ---")
+    print("  7 — Администрирование и валидация базы знаний")
+    print("  8 — Аналитика успеваемости и выявление пробелов")
+    print("\n  q — Выход\n")
 
 
 def main():
@@ -264,6 +288,7 @@ def main():
         "4": lambda: run_scenario4(loader),
         "5": lambda: run_scenario5(loader),
         "6": lambda: run_scenario6(loader),
+        "7": lambda: run_scenario7(loader),
         "8": lambda: run_scenario8(loader),
     }
 
@@ -280,7 +305,7 @@ def main():
         elif choice in scenarios:
             scenarios[choice]()
         else:
-            print("\n  Неверный выбор. Введите 1-6, 8 или q.\n")
+            print("\n  Неверный выбор. Введите 1-8 или q.\n")
 
 
 if __name__ == "__main__":
