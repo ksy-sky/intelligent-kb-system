@@ -120,3 +120,9 @@ class KnowledgeBaseLoader:
             "metadata": self.metadata,
             "is_loaded": self._is_loaded
         }
+    
+    def get_labs_by_topic(self, topic_id: str) -> List[str]:
+        """Возвращает список ID лабораторных работ для заданного раздела."""
+        if not topic_id or topic_id not in self.topics_index:
+            return []
+        return self.topics_index[topic_id].get('concept_ids', [])
