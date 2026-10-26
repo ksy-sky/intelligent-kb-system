@@ -163,7 +163,7 @@ def run_scenario4(loader: KnowledgeBaseLoader):
 def run_scenario5(loader: KnowledgeBaseLoader):
     """Построение индивидуальной учебной траектории и формирование рекомендаций."""
     if TrajectorySolver is None:
-        print("\n  ❌ Ошибка: Модуль планировщика не загружен.\n")
+        print("\n  Ошибка: Модуль планировщика не загружен.\n")
         return
 
     print_separator("СЦЕНАРИЙ 5: ПЛАНИРОВЩИК И РЕКОМЕНДАЦИИ [Студент]")
@@ -190,7 +190,7 @@ def run_scenario5(loader: KnowledgeBaseLoader):
             print(f"    • {rec['term']}:")
             if rec['definition']:
                 inh = f" (унаследовано от {rec['inherited_from']})" if rec['inherited_from'] else ""
-                print(f"      Определение{inh}: {rec['definition'][:80]}...")
+                print(f"      Определение{inh}: {rec['definition']}")
             if rec['lab_ids']:
                 print(f"      Лабораторные: {', '.join(rec['lab_ids'])}")
                 
