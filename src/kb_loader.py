@@ -120,9 +120,50 @@ class KnowledgeBaseLoader:
             "metadata": self.metadata,
             "is_loaded": self._is_loaded
         }
-    
+
+    def get_related_labs(self, concept_id: str) -> List[str]:
+        """
+        Возвращает список идентификаторов разделов лабораторного практикума
+        (topic_id, начинающиеся на 'L'), в концептах которых данный
+        concept_id упоминается как связь (например, 'используется в').
+
+        Это реализует требование «номера лабораторных работ, в которых
+        фигурирует данный концепт» (раздел 2.5.2 ПЗ).
+        """
+        if not concept_id or concept_id not in self.concepts_by_id:
+            return []
+
+        related_topics: Set[str] = set()
+
+        for other_cid, other_concept in self.concepts_by_id.items():
+            other_tid = str(other_concept.get("topic_id", ""))
+            if not other_tid.startswith("L"):
+                continue  # интересуют только лабораторные концепты
+
+            relations = other_concept.get("relations", {})
+            for targets in relations.values():
+                if concept_id in targets:
+                    related_topics.add(other_tid)
+                    break  # достаточно одного совпадения на концепт
+
+        return sorted(related_topics)
+
     def get_labs_by_topic(self, topic_id: str) -> List[str]:
-        """Возвращает список ID лабораторных работ для заданного раздела."""
+        """
+        УСТАРЕВШИЙ МЕТОД (сохранён для обратной совместимости со старыми
+        вызовами). Ранее ошибочно возвращал concept_ids того же раздела
+        вместо реальных лабораторных работ, связанных с концептом.
+
+        Делегирует вызов в get_related_labs по topic_id первого концепта
+        указанного раздела, либо возвращает пустой список, если раздел
+        пуст или не найден.
+        """
         if not topic_id or topic_id not in self.topics_index:
             return []
-        return self.topics_index[topic_id].get('concept_ids', [])
+
+        concept_ids = self.topics_index[topic_id].get("concept_ids", [])
+        if not concept_ids:
+            return []
+
+        # Берём представительный концепт раздела и ищем связанные лабораторные
+        return self.get_related_labs(concept_ids[0])
