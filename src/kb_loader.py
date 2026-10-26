@@ -1,7 +1,7 @@
 # src/kb_loader.py
 import json
 import os
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Set
 from .kb_validator import validate_kb, KBValidationError
 
 class KnowledgeBaseLoader:
