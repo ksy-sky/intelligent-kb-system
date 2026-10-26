@@ -1,10 +1,12 @@
-
 """
 solver_trajectory.py — Решатель построения учебной траектории и рекомендаций (Сценарий 5).
 Реализует топологическую сортировку (алгоритм Кана) и формирование контекстных рекомендаций.
 """
+import logging
 from typing import Dict, List, Set, Tuple, Optional, Any
 from collections import deque
+
+logger = logging.getLogger(__name__)
 
 
 class TrajectorySolver:
@@ -20,10 +22,10 @@ class TrajectorySolver:
     def build_learning_plan(self, gap_ids: List[str]) -> List[Dict[str, str]]:
         """
         Построение упорядоченного плана изучения на основе множества пробелов.
-        
+
         Args:
             gap_ids: список идентификаторов концептов, которые необходимо изучить
-            
+
         Returns:
             упорядоченный список словарей вида {'concept_id': ..., 'term': ..., 'reason': ...}
         """
@@ -37,7 +39,7 @@ class TrajectorySolver:
 
         # Этап 1: Построение локального DAG из пробелов
         local_graph = self._build_subgraph(valid_gaps)
-        
+
         # Этап 2: Вычисление входящих степеней
         in_degree = {cid: 0 for cid in valid_gaps}
         for src, neighbors in local_graph.items():
@@ -47,24 +49,24 @@ class TrajectorySolver:
 
         # Инициализация очереди вершинами с нулевой входящей степенью (лексикографически)
         queue = sorted([cid for cid, deg in in_degree.items() if deg == 0])
-        
+
         trajectory = []
-        
+
         # Этап 3: Алгоритм Кана
         while queue:
             curr_cid = queue.pop(0)
             concept = self.loader.concepts_by_id[curr_cid]
-            
+
             # Генерация объяснения включения концепта в план
             reason = self._generate_reason(curr_cid, local_graph, in_degree)
-            
+
             trajectory.append({
                 'concept_id': curr_cid,
                 'term': concept.get('term', 'Unknown'),
                 'topic_id': concept.get('topic_id', ''),
                 'reason': reason
             })
-            
+
             # Обновление входящих степеней соседей
             for neighbor in local_graph.get(curr_cid, []):
                 if neighbor in in_degree:
@@ -84,32 +86,39 @@ class TrajectorySolver:
     def generate_recommendations(self, plan: List[Dict[str, str]]) -> List[Dict[str, Any]]:
         """
         Формирование контекстных рекомендаций по учебным материалам для каждого шага плана.
-        
+
         Args:
             plan: упорядоченный список концептов из build_learning_plan
-            
+
         Returns:
             список рекомендаций с определениями, примерами и лабораторными работами
         """
         recommendations = []
-        
+
         for step in plan:
             cid = step['concept_id']
-            concept = self.loader.concepts_by_id.get(cid, {})
-            
+
+            # Защита от концептов, отсутствующих в базе знаний
+            # (например, если план собирался до изменения БЗ преподавателем)
+            if cid not in self.loader.concepts_by_id:
+                logger.warning(f"Concept {cid} not found in knowledge base, skipped")
+                continue
+
+            concept = self.loader.concepts_by_id[cid]
+
             # Получение определения (с наследованием от предков при необходимости)
             definition = concept.get('definition', '')
             inherited_from = None
-            
+
             if not definition:
                 ancestor_def, ancestor_term = self._find_inherited_definition(cid)
                 if ancestor_def:
                     definition = ancestor_def
                     inherited_from = ancestor_term
-            
+
             # Получение лабораторных работ по topic_id
             lab_ids = self.loader.get_labs_by_topic(concept.get('topic_id', ''))
-            
+
             recommendations.append({
                 'concept_id': cid,
                 'term': step['term'],
@@ -120,14 +129,14 @@ class TrajectorySolver:
                 'examples': concept.get('examples', []),
                 'lab_ids': lab_ids
             })
-            
+
         return recommendations
 
     def _build_subgraph(self, node_ids: List[str]) -> Dict[str, List[str]]:
         """Построение подграфа зависимостей только для указанных узлов."""
         graph = {nid: [] for nid in node_ids}
         node_set = set(node_ids)
-        
+
         for cid in node_ids:
             relations = self.loader.concepts_by_id[cid].get('relations', {})
             # Учитываем связи "надкласс" и "используется в" как зависимости
@@ -136,25 +145,25 @@ class TrajectorySolver:
                 for target in targets:
                     if target in node_set:
                         graph[target].append(cid)  # target -> cid (target является пререквизитом для cid)
-                        
+
         return graph
 
-    def _generate_reason(self, cid: str, graph: Dict[str, List[str]], 
+    def _generate_reason(self, cid: str, graph: Dict[str, List[str]],
                          in_degree: Dict[str, int]) -> str:
         """Генерация пояснения, почему данный концепт включён в траекторию."""
         # Находим прямых потомков данного узла в подграфе пробелов
         dependents = graph.get(cid, [])
         valid_dependents = [d for d in dependents if d in in_degree and in_degree[d] > 0]
-        
+
         if valid_dependents:
             dep_terms = []
             for dep_cid in valid_dependents[:3]:  # Ограничиваем количество для читаемости
                 dep_concept = self.loader.concepts_by_id.get(dep_cid, {})
                 dep_terms.append(dep_concept.get('term', dep_cid))
-            
+
             deps_str = ', '.join(dep_terms)
             return f"Необходим для изучения: {deps_str}"
-        
+
         return "Базовый концепт / Корневой элемент траектории"
 
     def _find_inherited_definition(self, cid: str, max_depth: int = 10) -> Tuple[Optional[str], Optional[str]]:
@@ -162,34 +171,34 @@ class TrajectorySolver:
         visited = set()
         current = cid
         depth = 0
-        
+
         while depth < max_depth:
             if current in visited:
                 break
             visited.add(current)
-            
+
             concept = self.loader.concepts_by_id.get(current, {})
             if concept.get('definition'):
                 return concept['definition'], concept.get('term')
-            
+
             # Переход к родителям
             parents = concept.get('relations', {}).get('надкласс', [])
             if not parents:
                 break
-                
+
             # Берём первого валидного родителя
             next_parent = None
             for p in parents:
                 if p in self.loader.concepts_by_id:
                     next_parent = p
                     break
-                    
+
             if not next_parent:
                 break
-                
+
             current = next_parent
             depth += 1
-            
+
         return None, None
 
     @staticmethod
