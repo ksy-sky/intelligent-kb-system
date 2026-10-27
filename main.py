@@ -28,10 +28,14 @@ except ImportError:
     print("⚠️ Внимание: solver_trajectory.py не найден или содержит ошибки.")
     TrajectorySolver = None
 
-# Заглушки для остальных решателей (пока они пустые или не готовы к интеграции)
-def get_missing_prerequisites(target_id, mastered_ids, loader):
-    return ["[Заглушка] solver_diagnostics.py"]
+# Решатель диагностики (Сценарий 4)
+try:
+    from src.solver_diagnostics import DiagnosticsSolver
+except Exception as e:
+    print(f"⚠️ Внимание: не удалось загрузить src/solver_diagnostics.py: {type(e).__name__}: {e}")
+    DiagnosticsSolver = None
 
+# Заглушки для остальных решателей (пока они пустые или не готовы к интеграции)
 def find_lca(id1, id2, loader):
     return "[Заглушка] solver_comparator.py"
 
@@ -147,15 +151,68 @@ def run_scenario3(loader: KnowledgeBaseLoader = None):
 #=================================================================
 #СЦЕНАРИЙ 4 — Адаптивная диагностика пробелов (Дана)
 #=================================================================
+def ask_diagnostic_question(index: int, total: int, q) -> str:
+    """Задаёт один проверочный вопрос в консоли. Пустой ввод = нет ответа."""
+    print(f"\n  Вопрос {index}/{total}: {q.text}")
+    if q.kind == "choice":
+        for i, opt in enumerate(q.options, 1):
+            print(f"    {i}. {opt}")
+        print("    0. Не знаю")
+        prompt = "  Ваш ответ (номер, Enter — пропустить): "
+    else:
+        prompt = "  Ваш ответ (да/нет, Enter — пропустить): "
+    try:
+        return input(prompt).strip()
+    except (KeyboardInterrupt, EOFError):
+        return ""
+
+def show_diagnostics_result(result: dict):
+    """Форматированный вывод результата диагностики (Сценарий 4)."""
+    print(f"\n  {result['message']}")
+    if result["status"] == "error":
+        if result["similar"]:
+            print("  Похожие концепты:")
+            for s in result["similar"]:
+                print(f"    - [{s['concept_id']}] {s['term']}")
+        return
+    if result["status"] == "plan_built":
+        print(f"  Освоено: {len(result['mastered'])}, пробелов: {len(result['gaps'])}")
+        if result["unanswered"]:
+            print(f"  Без ответа (считаются неосвоенными): {', '.join(result['unanswered'])}")
+        print()
+    for idx, step in enumerate(result["plan"], 1):
+        mark = "  ← цель" if step["is_target"] else ""
+        print(f"    {idx}. [{step['concept_id']}] {step['term']}{mark}")
+        print(f"       Обоснование: {step['reason']}")
+    if result["cycle"]:
+        print(f"\n  Внимание: обнаружен цикл зависимостей среди: {', '.join(result['cycle'])}")
+    if result["status"] == "plan_built":
+        print("\n  Подробные материалы по пробелам — в сценарии 5 "
+              f"(ID: {', '.join(result['gaps'])}).")
+
 def run_scenario4(loader: KnowledgeBaseLoader):
-    """Адаптивная диагностика пробелов в знаниях студента."""
+    """Адаптивная диагностика пробелов и построение учебной траектории."""
+    if DiagnosticsSolver is None:
+        print("\n  Ошибка: Модуль диагностики не загружен.\n")
+        return
+
     print_separator("СЦЕНАРИЙ 4: АДАПТИВНАЯ ДИАГНОСТИКА ПРОБЕЛОВ [Студент]")
-    target_id = input("  Введите ID целевого концепта (например, C042): ").strip()
-    mastered_input = input("  Введите ID освоенных концептов через запятую (например, C001, C002): ").strip()
-    mastered_ids = [m.strip() for m in mastered_input.split(",")] if mastered_input else []
-    missing = get_missing_prerequisites(target_id, mastered_ids, loader)
-    print(f"\n  Выявленные пробелы в знаниях для концепта {target_id}:")
-    print(f"  {missing if missing else 'Пробелов нет, все пререквизиты освоены!'}")
+    target = input("  Введите целевой концепт (ID или термин, например C042): ").strip()
+
+    solver = DiagnosticsSolver(loader)
+    result, ctx = solver.start(target)
+    if result is not None:       # ошибка или цель без пререквизитов
+        show_diagnostics_result(result)
+        return
+
+    total = len(ctx.questions)
+    print(f"\n  Для концепта «{solver._term(ctx.target_id)}» найдено пререквизитов: {total}.")
+    print("  Ответьте на проверочные вопросы (Enter — пропустить вопрос).")
+    answers = {}
+    for i, q in enumerate(ctx.questions, 1):
+        answers[q.concept_id] = ask_diagnostic_question(i, total, q)
+
+    show_diagnostics_result(solver.finish(ctx, answers))
 
 #=================================================================
 #СЦЕНАРИЙ 5 — Построение траектории и рекомендации (Аня)
