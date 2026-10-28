@@ -839,11 +839,18 @@ class IntelligentAssistant:
             merged_examples = []
             merged_definition = ""
 
-            for c in all_concepts:
-                if c.get("definition") and (
-                    not merged_definition or c.get("source") == "theory"
-                ):
+        
+            for c in self.theory_base:
+                if c.get("term", "").lower() == term_name.lower() and c.get("definition"):
                     merged_definition = c["definition"]
+                    break
+            if not merged_definition:
+                for c in self.labs_base:
+                    if c.get("term", "").lower() == term_name.lower() and c.get("definition"):
+                        merged_definition = c["definition"]
+                        break
+
+            for c in all_concepts:
                 for ex in c.get("examples", []):
                     if not str(ex).startswith("./") and ex not in merged_examples:
                         merged_examples.append(ex)
@@ -857,6 +864,7 @@ class IntelligentAssistant:
                             and resolved not in merged_relations[k]
                         ):
                             merged_relations[k].append(resolved)
+
 
             if need_definition and merged_definition:
                 return {

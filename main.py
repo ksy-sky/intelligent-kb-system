@@ -35,9 +35,14 @@ except Exception as e:
     print(f"⚠️ Внимание: не удалось загрузить src/solver_diagnostics.py: {type(e).__name__}: {e}")
     DiagnosticsSolver = None
 
-# Заглушки для остальных решателей (пока они пустые или не готовы к интеграции)
-def find_lca(id1, id2, loader):
-    return "[Заглушка] solver_comparator.py"
+# Решатель семантического компаратора (Сценарий 6)
+try:
+    from src.solver_comparator import ComparatorSolver
+except Exception as e:
+    print(f"⚠️ Внимание: не удалось загрузить src/solver_comparator.py: {type(e).__name__}: {e}")
+    ComparatorSolver = None
+        
+
 
 #================= ПУТИ К ФАЙЛАМ =================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -93,6 +98,45 @@ def show_glossary_result(result: dict):
         else:
             print("  Похожих терминов не найдено.")
 
+def _show_comparator_result(result: dict):
+    """Форматированный вывод результата сравнения (Сценарий 6)."""
+    print(f"\n  {result['message']}")
+    if result["status"] == "error":
+        for m in result.get("missing", []):
+            if m.get("similar"):
+                print(f"    Похожие: {', '.join(s['term'] for s in m['similar'])}")
+        return
+    if result["status"] in ("success", "identical"):
+        print(f"  Концепт 1: [{result['concept_id_1']}] {result['term_1']}")
+        print(f"  Концепт 2: [{result['concept_id_2']}] {result['term_2']}")
+        print(f"  LCA:       [{result['lca_id']}] {result['lca_term']}")
+        print(f"  Расстояние от C1 до LCA: {result['distance_1']}")
+        print(f"  Расстояние от C2 до LCA: {result['distance_2']}")
+        print(f"  Семантическая близость:  {result['semantic_similarity']}")
+        if result.get("relation"):
+            print(f"  Отношение: {result['relation']}")
+        if result.get("common_ancestors") and len(result["common_ancestors"]) > 1:
+            print(f"  Все общие предки ({len(result['common_ancestors'])}):")
+            for a in result["common_ancestors"]:
+                print(
+                    f"    - [{a['concept_id']}] {a['term']} "
+                    f"(расст. до C1: {a['distance_to_c1']}, до C2: {a['distance_to_c2']})"
+                )
+
+
+def run_scenario6(loader: KnowledgeBaseLoader):
+    """Семантическое сравнение двух концептов через поиск ближайшего общего предка (LCA)."""
+    if ComparatorSolver is None:
+        print("\n  Ошибка: Модуль семантического компаратора не загружен.\n")
+        return
+    print_separator("СЦЕНАРИЙ 6: СЕМАНТИЧЕСКИЙ КОМПАРАТОР (LCA) [Студент]")
+    print("  Можно вводить как ID (например, C040), так и название термина.")
+    print("  Примеры: «дерево», «линейная структура данных», «граф».\n")
+    id1 = input("  Введите первый концепт: ").strip()
+    id2 = input("  Введите второй концепт: ").strip()
+    solver = ComparatorSolver(loader)
+    result = solver.compare(id1, id2)
+    _show_comparator_result(result)
 #=================================================================
 #СЦЕНАРИЙ 1 — Самостоятельное изучение теоретического материала
 #=================================================================
@@ -259,15 +303,17 @@ def run_scenario5(loader: KnowledgeBaseLoader):
 #=================================================================
 def run_scenario6(loader: KnowledgeBaseLoader):
     """Семантическое сравнение двух концептов через поиск ближайшего общего предка (LCA)."""
+    if ComparatorSolver is None:
+        print("\n  Ошибка: Модуль семантического компаратора не загружен.\n")
+        return
     print_separator("СЦЕНАРИЙ 6: СЕМАНТИЧЕСКИЙ КОМПАРАТОР (LCA) [Студент]")
-    id1 = input("  Введите ID первого концепта (например, C040): ").strip()
-    id2 = input("  Введите ID второго концепта (например, C042): ").strip()
-    lca = find_lca(id1, id2, loader)
-    if lca:
-        lca_concept = loader.concepts_by_id.get(lca, {})
-        print(f"\n  Ближайший общий предок (LCA): [{lca}] {lca_concept.get('term', '')}")
-    else:
-        print("\n  Общий предок не найден.")
+    print("  Можно вводить как ID (например, C040), так и название термина.")
+    print("  Примеры: «дерево», «линейная структура данных», «граф».\n")
+    id1 = input("  Введите первый концепт: ").strip()
+    id2 = input("  Введите второй концепт: ").strip()
+    solver = ComparatorSolver(loader)
+    result = solver.compare(id1, id2)
+    _show_comparator_result(result)
 
 #=================================================================
 #СЦЕНАРИЙ 7 — Администрирование и валидация БЗ (Ксюша, через роутер)
