@@ -57,7 +57,7 @@ _NO = {"н", "нет", "n", "no", "0"}
 
 @dataclass
 class Question:
-    """Проверочный вопрос по одному концепту."""
+    "Проверочный вопрос по одному концепту."
     concept_id: str
     term: str
     text: str
@@ -68,7 +68,7 @@ class Question:
 
 @dataclass
 class DiagnosticsContext:
-    """Состояние диагностики между шагами start() и finish()."""
+    "Состояние диагностики между шагами start() и finish()."
     target_id: str
     deps: Dict[str, List[Tuple[str, str]]]      # концепт -> [(пререквизит, тип связи)]
     prerequisites: List[str]                    # пререквизиты цели (без неё), порядок обнаружения
@@ -76,7 +76,7 @@ class DiagnosticsContext:
 
 
 class DiagnosticsSolver:
-    """Решатель адаптивной диагностики пробелов и построения плана изучения."""
+    "Решатель адаптивной диагностики пробелов и построения плана изучения."
 
     def __init__(self, loader, used_in_inverted: bool = False, n_distractors: int = 3,
                  max_depth: Optional[int] = None, similar_limit: int = 5):
@@ -94,10 +94,6 @@ class DiagnosticsSolver:
         self.max_depth = max_depth
         self.similar_limit = similar_limit
         self._used_in_rev: Optional[Dict[str, Set[str]]] = None
-
-    # ------------------------------------------------------------------
-    # Доступ к БЗ
-    # ------------------------------------------------------------------
     @property
     def _concepts(self) -> Dict[str, dict]:
         return self.loader.concepts_by_id
@@ -120,7 +116,7 @@ class DiagnosticsSolver:
         return self._used_in_rev
 
     def direct_prerequisites(self, cid: str) -> List[Tuple[str, str]]:
-        """Прямые пререквизиты концепта: [(id пререквизита, тип связи)] без дублей."""
+        "Прямые пререквизиты концепта: [(id пререквизита, тип связи)] без дублей."
         result: List[Tuple[str, str]] = []
         seen: Set[Tuple[str, str]] = set()
 
@@ -141,9 +137,6 @@ class DiagnosticsSolver:
             add(p, REL_USED_IN)
         return result
 
-    # ------------------------------------------------------------------
-    # Поиск цели
-    # ------------------------------------------------------------------
     def resolve_target(self, query: str) -> Optional[str]:
         """Определение concept_id по ID или по термину (без учёта регистра)."""
         query = (query or "").strip()
@@ -161,7 +154,7 @@ class DiagnosticsSolver:
         return None
 
     def find_similar(self, query: str) -> List[Dict[str, str]]:
-        """Похожие концепты: близкие по написанию термины и термины с подстрокой запроса."""
+        "Похожие концепты: близкие по написанию термины и термины с подстрокой запроса."
         query = (query or "").strip().lower()
         if not query:
             return []
@@ -180,10 +173,6 @@ class DiagnosticsSolver:
             if query in t and cid not in found:
                 found.append(cid)
         return [{"concept_id": cid, "term": self._term(cid)} for cid in found[:self.similar_limit]]
-
-    # ------------------------------------------------------------------
-    # Шаг 2: сбор пререквизитов
-    # ------------------------------------------------------------------
     def collect_prerequisites(
         self, target_id: str
     ) -> Tuple[Dict[str, List[Tuple[str, str]]], List[str]]:
@@ -211,9 +200,7 @@ class DiagnosticsSolver:
                     queue.append((pid, depth + 1))
         return deps, order
 
-    # ------------------------------------------------------------------
-    # Шаг 3: генерация вопросов
-    # ------------------------------------------------------------------
+    
     @staticmethod
     def _short(text: str, limit: int = 160) -> str:
         text = " ".join(str(text).split())
@@ -270,10 +257,6 @@ class DiagnosticsSolver:
             concept_id=cid, term=term, kind="choice",
             text=f"Какое определение соответствует понятию «{term}»?",
             options=options, correct_index=options.index(definition))
-
-    # ------------------------------------------------------------------
-    # Шаг 4: модель освоенных понятий
-    # ------------------------------------------------------------------
     @staticmethod
     def evaluate_answer(question: Question, answer: Any) -> Optional[bool]:
         """
@@ -319,12 +302,10 @@ class DiagnosticsSolver:
                 gaps.add(q.concept_id)
         return mastered, gaps, unanswered
 
-    # ------------------------------------------------------------------
-    # Шаг 5: граф пробелов и алгоритм Кана
-    # ------------------------------------------------------------------
+    
     @staticmethod
     def _ancestors(start: str, deps: Dict[str, List[Tuple[str, str]]]) -> Set[str]:
-        """Все транзитивные пререквизиты концепта."""
+        "Все транзитивные пререквизиты концепта."
         result: Set[str] = set()
         stack = [p for p, _ in deps.get(start, ())]
         while stack:
@@ -374,9 +355,7 @@ class DiagnosticsSolver:
         cycle = sorted(n for n, d in in_degree.items() if d > 0)
         return ordered, cycle
 
-    # ------------------------------------------------------------------
-    # Обоснование включения в план
-    # ------------------------------------------------------------------
+    
     def _explain(self, cid: str, target_id: str, deps: Dict[str, List[Tuple[str, str]]],
                  gaps: Set[str], unanswered: Set[str]) -> str:
         why = ("нет ответа на вопрос — считается неосвоенным"
@@ -405,9 +384,7 @@ class DiagnosticsSolver:
             "is_target": is_target,
         }
 
-    # ------------------------------------------------------------------
-    # Публичный API
-    # ------------------------------------------------------------------
+    
     def start(self, target_query: str) -> Tuple[Optional[Dict[str, Any]], Optional[DiagnosticsContext]]:
         """
         Шаг 1: поиск цели, сбор пререквизитов, генерация вопросов.
