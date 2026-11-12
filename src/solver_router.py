@@ -1,7 +1,6 @@
-"""
-Маршрутизатор запросов к решателям задач (API-шлюз / Фасад).
-Реализует стратегию fail-fast и централизованную валидацию.
-"""
+
+#  Маршрутизатор запросов к решателям задач (API-шлюз / Фасад).
+
 
 import re
 from typing import Dict, Any, Optional
@@ -12,7 +11,7 @@ from .solver_admin import AdminSolver
 class SolverRouter:
     """Центральная точка входа для всех запросов к решателям задач"""
 
-    # Регулярное выражение для валидации concept_id из ПЗ (раздел 2.5.1)
+    # Регулярное выражение для валидации concept_id
     ID_PATTERN = re.compile(r'^C(?:L)?\d{2,4}$')
 
     def __init__(self, kb_loader):
@@ -22,16 +21,11 @@ class SolverRouter:
         self.registry = {
             'analytics': AnalyticsSolver(kb_loader),
             'admin': AdminSolver(type(kb_loader), data_dir='data'),
-            # Сюда позже добавятся решатели Ани, Юли и Даны:
-            # 'trajectory': TrajectorySolver(kb_loader),
-            # 'comparator': ComparatorSolver(kb_loader),
-            # 'diagnostics': DiagnosticsSolver(kb_loader),
+            # Сюда позже добавятся решатели Ани, Юли и Даны ?
         }
 
     def handle_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Обработка входящего запроса Q = <action, params>.
-        """
+           #  Обработка входящего запроса Q = <action, params>.
         action = request.get('action')
         params = request.get('params', {})
 
@@ -78,9 +72,8 @@ class SolverRouter:
             }
 
     def _validate_params(self, action: str, params: Dict) -> Optional[Dict]:
-        """
-        Валидация параметров по стратегии fail-fast.
-        """
+        #  Валидация параметров по стратегии fail-fast.
+        
         # Проверка обязательных ключей
         if action == 'analytics':
             if 'student_models' not in params or 'target_concepts' not in params:
