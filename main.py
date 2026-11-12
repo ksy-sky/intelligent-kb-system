@@ -25,21 +25,21 @@ from src.solver_router import SolverRouter
 try:
     from src.solver_trajectory import TrajectorySolver
 except ImportError:
-    print("⚠️ Внимание: solver_trajectory.py не найден или содержит ошибки.")
+    print(" Внимание: solver_trajectory.py не найден или содержит ошибки.")
     TrajectorySolver = None
 
 # Решатель диагностики (Сценарий 4)
 try:
     from src.solver_diagnostics import DiagnosticsSolver
 except Exception as e:
-    print(f"⚠️ Внимание: не удалось загрузить src/solver_diagnostics.py: {type(e).__name__}: {e}")
+    print(f" Внимание: не удалось загрузить src/solver_diagnostics.py: {type(e).__name__}: {e}")
     DiagnosticsSolver = None
 
 # Решатель семантического компаратора (Сценарий 6)
 try:
     from src.solver_comparator import ComparatorSolver
 except Exception as e:
-    print(f"⚠️ Внимание: не удалось загрузить src/solver_comparator.py: {type(e).__name__}: {e}")
+    print(f" Внимание: не удалось загрузить src/solver_comparator.py: {type(e).__name__}: {e}")
     ComparatorSolver = None
         
 
@@ -262,42 +262,74 @@ def run_scenario4(loader: KnowledgeBaseLoader):
 #СЦЕНАРИЙ 5 — Построение траектории и рекомендации (Аня)
 #=================================================================
 def run_scenario5(loader: KnowledgeBaseLoader):
-    """Построение индивидуальной учебной траектории и формирование рекомендаций."""
     if TrajectorySolver is None:
         print("\n  Ошибка: Модуль планировщика не загружен.\n")
         return
 
     print_separator("СЦЕНАРИЙ 5: ПЛАНИРОВЩИК И РЕКОМЕНДАЦИИ [Студент]")
-    missing_input = input("  Введите список проблемных ID через запятую (например, C010, C015): ").strip()
+    missing_input = input("  Введите список проблемных ID через запятую (например, CL152,CL153): ").strip()
     missing_ids = [m.strip() for m in missing_input.split(",")] if missing_input else []
-    
+
+    invalid_ids = [m for m in missing_ids if m not in loader.concepts_by_id]
+    if invalid_ids:
+        print(f"\n  Не найдены в базе знаний и пропущены: {', '.join(invalid_ids)}")
+
     solver = TrajectorySolver(loader)
-    
+
     try:
         plan = solver.build_learning_plan(missing_ids)
         if not plan:
             print("\n  Все указанные концепты уже освоены или отсутствуют в БЗ.")
             return
-            
-        print(f"\n  Рекомендованный план изучения ({len(plan)} шагов):")
-        for idx, step in enumerate(plan, 1):
-            print(f"    {idx}. [{step['concept_id']}] {step['term']}")
-            print(f"       Причина: {step['reason']}")
-            
-        # Формирование рекомендаций
+
         recs = solver.generate_recommendations(plan)
-        print(f"\n  Учебные материалы:")
-        for rec in recs:
-            print(f"    • {rec['term']}:")
+        recs_by_id = {r['concept_id']: r for r in recs}
+
+        print(f"\n  Рекомендованный план изучения ({len(plan)} шагов):\n")
+
+        for idx, step in enumerate(plan, 1):
+            rec = recs_by_id.get(step['concept_id'])
+
+            print(f"  {'─' * 58}")
+            print(f"  ШАГ {idx}. [{step['concept_id']}] {step['term']}")
+            print(f"  Причина включения: {step['reason']}")
+
+            if not rec:
+                continue
+
+            if rec.get('topic_title'):
+                print(f"\n  Раздел: {rec['topic_id']} — {rec['topic_title']}")
+
+            if rec.get('criticality', 0) > 0:
+                print(f"  Критичность: от этого понятия зависит {rec['criticality']} понятий в БЗ")
+
             if rec['definition']:
-                inh = f" (унаследовано от {rec['inherited_from']})" if rec['inherited_from'] else ""
-                print(f"      Определение{inh}: {rec['definition']}")
+                inh = f" (унаследовано от «{rec['inherited_from']}»)" if rec['inherited_from'] else ""
+                print(f"  Определение{inh}:")
+                print(f"    {rec['definition']}")
+
+            if rec.get('examples'):
+                print(f"  Примеры:")
+                for ex in rec['examples']:
+                    print(f"    • {ex}")
+
+            if rec.get('related'):
+                print(f"  Связано с:")
+                for rel_type, terms in rec['related'].items():
+                    print(f"    {rel_type}: {', '.join(terms)}")
+            elif rec.get('similar_by_text'):
+                print(f"  Явных связей в БЗ нет. Похожие по смыслу понятия:")
+                for sim in rec['similar_by_text']:
+                    print(f"    • {sim['term']} (сходство: {sim['similarity']})")
+
             if rec['lab_ids']:
-                print(f"      Лабораторные: {', '.join(rec['lab_ids'])}")
-                
+                print(f"  Лабораторные работы: {', '.join(rec['lab_ids'])}")
+
+        print(f"  {'─' * 58}")
+
+
     except ValueError as e:
         print(f"\n  Ошибка построения траектории: {e}")
-
 #=================================================================
 #СЦЕНАРИЙ 6 — Семантический компаратор / LCA (Юля)
 #=================================================================
