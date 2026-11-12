@@ -91,7 +91,6 @@ class ComparatorSolver:
         Возвращает {предок_id: глубина}.
         Глубина самого концепта = 0, его прямой надкласс = 1 и т.д.
         """
-        # ВАЖНО: добавляем сам концепт с глубиной 0, чтобы он мог быть LCA
         ancestors: Dict[str, int] = {cid: 0}  
         queue: deque = deque([(cid, 0)])
         visited: Set[str] = {cid}
@@ -110,7 +109,7 @@ class ComparatorSolver:
         ВАЖНО: Корень (без надклассов) имеет глубину 1 (стандарт меры Ву-Палмера),
         чтобы избежать нулевой семантической близости.
         """
-        depth = 1  # ← Изменено с 0 на 1
+        depth = 1  
         visited: Set[str] = set()
         current = cid
         while current and current not in visited:
