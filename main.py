@@ -15,6 +15,7 @@ main.py — точка входа интеллектуальной обучаю�
 """
 import os
 import sys
+from types import SimpleNamespace
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from src.kb_loader import KnowledgeBaseLoader
@@ -98,6 +99,16 @@ def show_glossary_result(result: dict):
         else:
             print("  Похожих терминов не найдено.")
 
+def print_router_error(resp: dict):
+    """Единый вывод ошибки роутера."""
+    err = resp["error"]
+    print(f"\n  Ошибка [{err['code']}]: {err['message']}")
+    d = err.get("details")
+    if isinstance(d, dict) and d.get("similar"):
+        print(f"  Возможно, вы имели в виду: {', '.join(d['similar'])}")
+    elif isinstance(d, dict) and d.get("candidates"):
+        print("  Уточните концепт (ID): " + ", ".join(c["concept_id"] for c in d["candidates"]))
+
 def _show_comparator_result(result: dict):
     """Форматированный вывод результата сравнения (Сценарий 6)."""
     print(f"\n  {result['message']}")
@@ -124,19 +135,6 @@ def _show_comparator_result(result: dict):
                 )
 
 
-def run_scenario6(loader: KnowledgeBaseLoader):
-    """Семантическое сравнение двух концептов через поиск ближайшего общего предка (LCA)."""
-    if ComparatorSolver is None:
-        print("\n  Ошибка: Модуль семантического компаратора не загружен.\n")
-        return
-    print_separator("СЦЕНАРИЙ 6: СЕМАНТИЧЕСКИЙ КОМПАРАТОР (LCA) [Студент]")
-    print("  Можно вводить как ID (например, C040), так и название термина.")
-    print("  Примеры: «дерево», «линейная структура данных», «граф».\n")
-    id1 = input("  Введите первый концепт: ").strip()
-    id2 = input("  Введите второй концепт: ").strip()
-    solver = ComparatorSolver(loader)
-    result = solver.compare(id1, id2)
-    _show_comparator_result(result)
 #=================================================================
 #СЦЕНАРИЙ 1 — Самостоятельное изучение теоретического материала
 #=================================================================
@@ -234,118 +232,109 @@ def show_diagnostics_result(result: dict):
         print("\n  Подробные материалы по пробелам — в сценарии 5 "
               f"(ID: {', '.join(result['gaps'])}).")
 
-def run_scenario4(loader: KnowledgeBaseLoader):
-    """Адаптивная диагностика пробелов и построение учебной траектории."""
-    if DiagnosticsSolver is None:
-        print("\n  Ошибка: Модуль диагностики не загружен.\n")
-        return
-
+def run_scenario4(router: SolverRouter):
+    """Адаптивная диагностика пробелов и построение учебной траектории (через роутер)."""
     print_separator("СЦЕНАРИЙ 4: АДАПТИВНАЯ ДИАГНОСТИКА ПРОБЕЛОВ [Студент]")
     target = input("  Введите целевой концепт (ID или термин, например C042): ").strip()
 
-    solver = DiagnosticsSolver(loader)
-    result, ctx = solver.start(target)
-    if result is not None:       # ошибка или цель без пререквизитов
-        show_diagnostics_result(result)
+    resp = router.handle_request({"action": "diagnose", "params": {"target": target}})
+    if resp["status"] == "error":
+        print_router_error(resp)
+        return
+    if resp["status"] == "success":          # цель без пререквизитов
+        show_diagnostics_result(resp["data"])
         return
 
-    total = len(ctx.questions)
-    print(f"\n  Для концепта «{solver._term(ctx.target_id)}» найдено пререквизитов: {total}.")
+    questions = resp["data"]["questions"]    # status == "need_input"
+    total = len(questions)
+    print(f"\n  Найдено пререквизитов: {total}.")
     print("  Ответьте на проверочные вопросы (Enter — пропустить вопрос).")
     answers = {}
-    for i, q in enumerate(ctx.questions, 1):
-        answers[q.concept_id] = ask_diagnostic_question(i, total, q)
+    for i, q in enumerate(questions, 1):
+        answers[q["concept_id"]] = ask_diagnostic_question(i, total, SimpleNamespace(**q))
 
-    show_diagnostics_result(solver.finish(ctx, answers))
+    resp = router.handle_request({"action": "diagnose", "params": {"target": target, "answers": answers}})
+    if resp["status"] == "error":
+        print_router_error(resp)
+    else:
+        show_diagnostics_result(resp["data"])
 
 #=================================================================
 #СЦЕНАРИЙ 5 — Построение траектории и рекомендации (Аня)
 #=================================================================
-def run_scenario5(loader: KnowledgeBaseLoader):
-    if TrajectorySolver is None:
-        print("\n  Ошибка: Модуль планировщика не загружен.\n")
-        return
-
+def run_scenario5(router: SolverRouter):
     print_separator("СЦЕНАРИЙ 5: ПЛАНИРОВЩИК И РЕКОМЕНДАЦИИ [Студент]")
     missing_input = input("  Введите список проблемных ID через запятую (например, CL152,CL153): ").strip()
-    missing_ids = [m.strip() for m in missing_input.split(",")] if missing_input else []
+    missing_ids = [m.strip() for m in missing_input.split(",") if m.strip()]
 
-    invalid_ids = [m for m in missing_ids if m not in loader.concepts_by_id]
-    if invalid_ids:
-        print(f"\n  Не найдены в базе знаний и пропущены: {', '.join(invalid_ids)}")
+    resp = router.handle_request({"action": "plan", "params": {"gaps": missing_ids}})
+    if resp["status"] == "error":
+        print_router_error(resp)
+        return
+    plan, recs = resp["data"]["plan"], resp["data"]["recommendations"]
+    if not plan:
+        print("\n  Все указанные концепты уже освоены или отсутствуют в БЗ.")
+        return
+    recs_by_id = {r['concept_id']: r for r in recs}
 
-    solver = TrajectorySolver(loader)
+    print(f"\n  Рекомендованный план изучения ({len(plan)} шагов):\n")
 
-    try:
-        plan = solver.build_learning_plan(missing_ids)
-        if not plan:
-            print("\n  Все указанные концепты уже освоены или отсутствуют в БЗ.")
-            return
-
-        recs = solver.generate_recommendations(plan)
-        recs_by_id = {r['concept_id']: r for r in recs}
-
-        print(f"\n  Рекомендованный план изучения ({len(plan)} шагов):\n")
-
-        for idx, step in enumerate(plan, 1):
-            rec = recs_by_id.get(step['concept_id'])
-
-            print(f"  {'─' * 58}")
-            print(f"  ШАГ {idx}. [{step['concept_id']}] {step['term']}")
-            print(f"  Причина включения: {step['reason']}")
-
-            if not rec:
-                continue
-
-            if rec.get('topic_title'):
-                print(f"\n  Раздел: {rec['topic_id']} — {rec['topic_title']}")
-
-            if rec.get('criticality', 0) > 0:
-                print(f"  Критичность: от этого понятия зависит {rec['criticality']} понятий в БЗ")
-
-            if rec['definition']:
-                inh = f" (унаследовано от «{rec['inherited_from']}»)" if rec['inherited_from'] else ""
-                print(f"  Определение{inh}:")
-                print(f"    {rec['definition']}")
-
-            if rec.get('examples'):
-                print(f"  Примеры:")
-                for ex in rec['examples']:
-                    print(f"    • {ex}")
-
-            if rec.get('related'):
-                print(f"  Связано с:")
-                for rel_type, terms in rec['related'].items():
-                    print(f"    {rel_type}: {', '.join(terms)}")
-            elif rec.get('similar_by_text'):
-                print(f"  Явных связей в БЗ нет. Похожие по смыслу понятия:")
-                for sim in rec['similar_by_text']:
-                    print(f"    • {sim['term']} (сходство: {sim['similarity']})")
-
-            if rec['lab_ids']:
-                print(f"  Лабораторные работы: {', '.join(rec['lab_ids'])}")
+    for idx, step in enumerate(plan, 1):
+        rec = recs_by_id.get(step['concept_id'])
 
         print(f"  {'─' * 58}")
+        print(f"  ШАГ {idx}. [{step['concept_id']}] {step['term']}")
+        print(f"  Причина включения: {step['reason']}")
+
+        if not rec:
+            continue
+
+        if rec.get('topic_title'):
+            print(f"\n  Раздел: {rec['topic_id']} — {rec['topic_title']}")
+
+        if rec.get('criticality', 0) > 0:
+            print(f"  Критичность: от этого понятия зависит {rec['criticality']} понятий в БЗ")
+
+        if rec['definition']:
+            inh = f" (унаследовано от «{rec['inherited_from']}»)" if rec['inherited_from'] else ""
+            print(f"  Определение{inh}:")
+            print(f"    {rec['definition']}")
+
+        if rec.get('examples'):
+            print(f"  Примеры:")
+            for ex in rec['examples']:
+                print(f"    • {ex}")
+
+        if rec.get('related'):
+            print(f"  Связано с:")
+            for rel_type, terms in rec['related'].items():
+                print(f"    {rel_type}: {', '.join(terms)}")
+        elif rec.get('similar_by_text'):
+            print(f"  Явных связей в БЗ нет. Похожие по смыслу понятия:")
+            for sim in rec['similar_by_text']:
+                print(f"    • {sim['term']} (сходство: {sim['similarity']})")
+
+        if rec['lab_ids']:
+            print(f"  Лабораторные работы: {', '.join(rec['lab_ids'])}")
+
+    print(f"  {'─' * 58}")
 
 
-    except ValueError as e:
-        print(f"\n  Ошибка построения траектории: {e}")
 #=================================================================
 #СЦЕНАРИЙ 6 — Семантический компаратор / LCA (Юля)
 #=================================================================
-def run_scenario6(loader: KnowledgeBaseLoader):
-    """Семантическое сравнение двух концептов через поиск ближайшего общего предка (LCA)."""
-    if ComparatorSolver is None:
-        print("\n  Ошибка: Модуль семантического компаратора не загружен.\n")
-        return
+
+def run_scenario6(router: SolverRouter):
+    """Семантическое сравнение двух концептов (LCA) через роутер."""
     print_separator("СЦЕНАРИЙ 6: СЕМАНТИЧЕСКИЙ КОМПАРАТОР (LCA) [Студент]")
-    print("  Можно вводить как ID (например, C040), так и название термина.")
-    print("  Примеры: «дерево», «линейная структура данных», «граф».\n")
-    id1 = input("  Введите первый концепт: ").strip()
-    id2 = input("  Введите второй концепт: ").strip()
-    solver = ComparatorSolver(loader)
-    result = solver.compare(id1, id2)
-    _show_comparator_result(result)
+    print("  Можно вводить как ID (например, C040), так и название термина.\n")
+    c1 = input("  Введите первый концепт: ").strip()
+    c2 = input("  Введите второй концепт: ").strip()
+    resp = router.handle_request({"action": "compare", "params": {"concept_1": c1, "concept_2": c2}})
+    if resp["status"] == "error":
+        print_router_error(resp)
+    else:
+        _show_comparator_result(resp["data"])
 
 #=================================================================
 #СЦЕНАРИЙ 7 — Администрирование и валидация БЗ (Ксюша, через роутер)
@@ -353,64 +342,49 @@ def run_scenario6(loader: KnowledgeBaseLoader):
 def run_scenario7(solver_router: SolverRouter):
     """Администрирование и валидация базы знаний через API-шлюз."""
     print_separator("СЦЕНАРИЙ 7: АДМИНИСТРИРОВАНИЕ И ВАЛИДАЦИЯ БЗ [Преподаватель]")
-    print("  Запуск автоматической проверки целостности БЗ: ")
-    print("  - Проверка уникальности concept_id ")
-    print("  - Проверка обязательных полей ")
-    print("  - Проверка ссылочной целостности relations ")
-    print("  - Проверка ацикличности иерархии 'надкласс'\n")
-    request = {"action": "admin", "params": {}}
-    result = solver_router.handle_request(request)
-    if result["status"] == "success" and result["data"]["status"] == "success":
-        data = result["data"]
+    print("  Проверка: уникальность concept_id, обязательные поля, ссылки relations, ацикличность 'надкласс'\n")
+    resp = solver_router.handle_request({"action": "admin", "params": {}})
+    if resp["status"] == "success":
+        data = resp["data"]
         print("  РЕЗУЛЬТАТ: УСПЕХ")
         print(f"    Проверено файлов: {data['files_checked']}")
-        print(f"    Всего концептов: {data['stats']['total_concepts']}")
-        print(f"    Всего разделов: {data['stats']['total_topics']}")
+        print(f"    Всего концептов: {data['stats']['concepts_count']}")
+        print(f"    Всего разделов: {data['stats']['topics_count']}")
     else:
+        err = resp["error"]
         print("  РЕЗУЛЬТАТ: ОШИБКА ВАЛИДАЦИИ")
-        print(f"    Код ошибки: {result['data'].get('error_code', 'UNKNOWN')}")
-        print(f"    Описание: {result['data'].get('message')}")
-        if "details" in result["data"]:
-            print(f"    Детали: {result['data']['details']}")
+        print(f"    Код ошибки: {err['code']}")
+        print(f"    Описание: {err['message']}")
+        if err.get("details"):
+            print(f"    Детали: {err['details']}")
 
-#=================================================================
-#СЦЕНАРИЙ 8 — Аналитика успеваемости (Ксюша, через роутер)
 #=================================================================
 def run_scenario8(solver_router: SolverRouter):
     """Аналитика успеваемости и выявление групповых пробелов через API-шлюз."""
     print_separator("СЦЕНАРИЙ 8: АНАЛИТИКА УСПЕВАЕМОСТИ ГРУППЫ [Преподаватель]")
     print("  Демонстрационный режим с тестовыми данными.\n")
-    # Демонстрационные данные: модели знаний студентов (множества освоенных concept_id)
-    student_models = [
-        {"C001", "C002", "C003"},
-        {"C001", "C002"},
-        {"C001", "C003"},
-        {"C001"},
-    ]
-    # Целевые концепты для анализа
-    target_concepts = ["C001", "C002", "C003"]
-    request = {
+    student_models = [{"C001", "C002", "C003"}, {"C001", "C002"}, {"C001", "C003"}, {"C001"}]
+    resp = solver_router.handle_request({
         "action": "analytics",
-        "params": {
-            "student_models": student_models,
-            "target_concepts": target_concepts,
-            "threshold": 0.3  # Порог значимости пробела (30%)
-        }
-    }
-    result = solver_router.handle_request(request)
-    if result["status"] == "success":
-        gaps = result["data"]["gaps"]
-        if gaps:
-            print(f"  Найдено {len(gaps)} концептов с групповыми пробелами:\n")
-            print(f"  {'Концепт':<20} {'Пробел':<10} {'Студентов':<15}")
-            print("  " + "-" * 55)
-            for gap in gaps:
-                print(f"    {gap['term']:<20} {gap['gap_ratio']*100:.0f}%{'':<5} {gap['students_with_gap']}/{gap['total_students']}")
-            print("\n  Рекомендация: повторите эти темы на следующей лекции.")
-        else:
-            print("  Групповые пробелы не обнаружены.")
+        "params": {"student_models": student_models,
+                   "target_concepts": ["C001", "C002", "C003"],
+                   "threshold": 0.3},
+    })
+    if resp["status"] != "success":
+        print(f"  Ошибка [{resp['error']['code']}]: {resp['error']['message']}")
+        return
+    for w in resp["metadata"]["warnings"]:
+        print(f"  Предупреждение: {w}")
+    gaps = resp["data"]
+    if gaps:
+        print(f"  Найдено {len(gaps)} концептов с групповыми пробелами:\n")
+        print(f"  {'Концепт':<20} {'Пробел':<10} {'Студентов':<15}")
+        print("  " + "-" * 55)
+        for g in gaps:
+            print(f"    {g['term']:<20} {g['gap_ratio']*100:.0f}%{'':<5} {g['students_with_gap']}/{g['total_students']}")
+        print("\n  Рекомендация: повторите эти темы на следующей лекции.")
     else:
-        print(f"  Ошибка: {result.get('message')}")
+        print("  Групповые пробелы не обнаружены.")
 
 #=================================================================
 #ГЛАВНОЕ МЕНЮ
@@ -453,9 +427,9 @@ def main():
         "1": lambda: run_scenario1(loader),
         "2": lambda: run_scenario2(loader),
         "3": lambda: run_scenario3(loader),
-        "4": lambda: run_scenario4(loader),
-        "5": lambda: run_scenario5(loader),
-        "6": lambda: run_scenario6(loader),
+        "4": lambda: run_scenario4(solver_router),
+        "5": lambda: run_scenario5(solver_router),
+        "6": lambda: run_scenario6(solver_router),
         "7": lambda: run_scenario7(solver_router),
         "8": lambda: run_scenario8(solver_router),
     }
