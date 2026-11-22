@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from src.kb_loader import KnowledgeBaseLoader
 from src.scenario_glossary import GlossaryScenario
 from src.solver_router import SolverRouter
+from src.results_store import save_diagnostic, list_targets, load_latest, to_analytics_params
 
 # БЕЗОПАСНЫЙ ИМПОРТ ВАШЕГО МОДУЛЯ ПЛАНИРОВЩИКА
 try:
@@ -236,6 +237,7 @@ def run_scenario4(router: SolverRouter):
     """Адаптивная диагностика пробелов и построение учебной траектории (через роутер)."""
     print_separator("СЦЕНАРИЙ 4: АДАПТИВНАЯ ДИАГНОСТИКА ПРОБЕЛОВ [Студент]")
     target = input("  Введите целевой концепт (ID или термин, например C042): ").strip()
+    student = input("  Ваше имя или псевдоним (для статистики группы): ").strip()
 
     resp = router.handle_request({"action": "diagnose", "params": {"target": target}})
     if resp["status"] == "error":
@@ -258,7 +260,8 @@ def run_scenario4(router: SolverRouter):
         print_router_error(resp)
     else:
         show_diagnostics_result(resp["data"])
-
+    if save_diagnostic(student, resp["data"]):
+        print("\n  Результат сохранён для аналитики преподавателя.")
 #=================================================================
 #СЦЕНАРИЙ 5 — Построение траектории и рекомендации (Аня)
 #=================================================================
@@ -362,13 +365,18 @@ def run_scenario7(solver_router: SolverRouter):
 def run_scenario8(solver_router: SolverRouter):
     """Аналитика успеваемости и выявление групповых пробелов через API-шлюз."""
     print_separator("СЦЕНАРИЙ 8: АНАЛИТИКА УСПЕВАЕМОСТИ ГРУППЫ [Преподаватель]")
-    print("  Демонстрационный режим с тестовыми данными.\n")
-    student_models = [{"C001", "C002", "C003"}, {"C001", "C002"}, {"C001", "C003"}, {"C001"}]
+    targets = list_targets()
+    if not targets:
+        print("  Данных диагностики пока нет. Пусть студенты пройдут сценарий 4.")
+        return
+    print("  Цели, по которым есть результаты:")
+    for tid, n in targets.items():
+        print(f"    {tid} — студентов: {n}")
+    target_id = input("  Введите ID цели: ").strip().upper()
+    records = load_latest(target_id)
     resp = solver_router.handle_request({
         "action": "analytics",
-        "params": {"student_models": student_models,
-                   "target_concepts": ["C001", "C002", "C003"],
-                   "threshold": 0.3},
+        "params": to_analytics_params(records, threshold=0.3),
     })
     if resp["status"] != "success":
         print(f"  Ошибка [{resp['error']['code']}]: {resp['error']['message']}")
