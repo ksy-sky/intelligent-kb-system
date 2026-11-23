@@ -11,3 +11,5 @@ venv/
 .DS_Store
 *.tmp
 *.swp
+data/results/
+.streamlit/secrets.toml
