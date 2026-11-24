@@ -6,7 +6,7 @@ main.py — точка входа интеллектуальной обучаю�
 Сценарий 3 — Работа с интеллектуальным ассистентом             (scenario_assistant.py) [Студент]
 Сценарий 4 — Адаптивная диагностика пробелов                   (solver_diagnostics.py) [Студент, Дана]
 Сценарий 5 — Построение траектории и рекомендации              (solver_trajectory.py) [Студент, Аня]
-Сценарий 6 — Семантический компаратор (LCA)                    (solver_comparator.py) [Студент, Юля]
+Сценарий 6 — Сравнение понятий: чем отличаются (solver_comparator.py) [Студент, Юля]
 Сценарий 7 — Администрирование и валидация базы знаний         (solver_admin.py) [Преподаватель, Ксюша]
 Сценарий 8 — Аналитика успеваемости и выявление пробелов       (solver_analytics.py) [Преподаватель, Ксюша]
 Архитектура:
@@ -15,6 +15,7 @@ main.py — точка входа интеллектуальной обучаю�
 """
 import os
 import sys
+import textwrap
 from types import SimpleNamespace
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -108,32 +109,143 @@ def print_router_error(resp: dict):
     if isinstance(d, dict) and d.get("similar"):
         print(f"  Возможно, вы имели в виду: {', '.join(d['similar'])}")
     elif isinstance(d, dict) and d.get("candidates"):
-        print("  Уточните концепт (ID): " + ", ".join(c["concept_id"] for c in d["candidates"]))
+        print("  Уточните концепт (ID): " + ", ".join(
+            f"{c['concept_id']} ({c.get('source', c.get('topic_id', ''))})" for c in d["candidates"]))
+
+def choose_candidate(err: dict):
+    """
+    Термину соответствует несколько концептов (теория и/или лабораторный практикум):
+    показывает список и просит выбрать. Возвращает concept_id или None (отмена).
+    """
+    det = err.get("details") or {}
+    cands = det.get("candidates", [])
+    print(f"\n  Термину «{det.get('value', '')}» соответствует несколько концептов:")
+    for i, c in enumerate(cands, 1):
+        print(f"    {i}. [{c['concept_id']}] {c['term']} — {c['source']} ({c['topic_id']}: {c['topic_title']})")
+        if c.get("definition"):
+            print(_wrap(c["definition"], "         "))
+    valid = {c["concept_id"] for c in cands}
+    while True:
+        try:
+            ans = input(f"  Выберите номер (1-{len(cands)}) или ID, Enter — отмена: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            return None
+        if not ans:
+            return None
+        if ans.isdigit() and 1 <= int(ans) <= len(cands):
+            return cands[int(ans) - 1]["concept_id"]
+        if ans.upper() in valid:
+            return ans.upper()
+        print("  Неверный выбор.")
+
+
+def request_with_choice(router: SolverRouter, action: str, params: dict):
+    """
+    Выполняет запрос; если термин неоднозначен, даёт пользователю выбрать ID и повторяет запрос.
+    Возвращает (ответ, параметры_с_выбранными_ID); при отмене выбора ответ — ошибка AMBIGUOUS_CONCEPT.
+    """
+    params = dict(params)
+    for _ in range(10):                                  # защита от бесконечного цикла
+        resp = router.handle_request({"action": action, "params": params})
+        err = resp.get("error") or {}
+        det = err.get("details") if isinstance(err.get("details"), dict) else {}
+        if err.get("code") != "AMBIGUOUS_CONCEPT" or not det.get("candidates"):
+            return resp, params
+        chosen = choose_candidate(err)
+        if chosen is None:
+            return resp, params
+        name, value = det.get("param"), det.get("value")
+        cur = params.get(name)
+        if isinstance(cur, str):
+            params[name] = chosen
+        elif isinstance(cur, (list, tuple)):
+            params[name] = [chosen if isinstance(x, str) and x.strip() == value else x for x in cur]
+        else:
+            return resp, params
+    return resp, params
+
+
+def _wrap(text: str, indent: str = "      ") -> str:
+    """Перенос длинных строк определений по ширине консоли."""
+    return textwrap.fill(text, width=76, initial_indent=indent, subsequent_indent=indent)
+
 
 def _show_comparator_result(result: dict):
-    """Форматированный вывод результата сравнения (Сценарий 6)."""
-    print(f"\n  {result['message']}")
-    if result["status"] == "error":
-        for m in result.get("missing", []):
-            if m.get("similar"):
-                print(f"    Похожие: {', '.join(s['term'] for s in m['similar'])}")
+    """Сравнительная карточка двух понятий (Сценарий 6)."""
+    lines = result["message"].split("\n")
+    if result["status"] == "identical":
+        print("\n  " + lines[0])
         return
-    if result["status"] in ("success", "identical"):
-        print(f"  Концепт 1: [{result['concept_id_1']}] {result['term_1']}")
-        print(f"  Концепт 2: [{result['concept_id_2']}] {result['term_2']}")
-        print(f"  LCA:       [{result['lca_id']}] {result['lca_term']}")
-        print(f"  Расстояние от C1 до LCA: {result['distance_1']}")
-        print(f"  Расстояние от C2 до LCA: {result['distance_2']}")
-        print(f"  Семантическая близость:  {result['semantic_similarity']}")
-        if result.get("relation"):
-            print(f"  Отношение: {result['relation']}")
-        if result.get("common_ancestors") and len(result["common_ancestors"]) > 1:
-            print(f"  Все общие предки ({len(result['common_ancestors'])}):")
-            for a in result["common_ancestors"]:
-                print(
-                    f"    - [{a['concept_id']}] {a['term']} "
-                    f"(расст. до C1: {a['distance_to_c1']}, до C2: {a['distance_to_c2']})"
-                )
+    print("\n  " + "\n  ".join(l for l in lines if not l.startswith("Близость")))   # итог близости — ниже
+
+    rel_titles = {
+        "ancestor": "надкласс — подкласс", "descendant": "надкласс — подкласс",
+        "siblings": "«соседи» (общий надкласс)", "cousins": "одна ветка иерархии",
+        "part_whole": "часть — целое", "common_whole": "элементы одного целого",
+        "linked": "связаны по смыслу", "text_similar": "похожие определения",
+        "same_topic": "один раздел, связей нет", "unrelated": "не связаны",
+    }
+    print(f"  Тип родства: {rel_titles.get(result['relationship'], result['relationship'])}")
+
+    if result.get("path_text"):
+        print(f"\n  Путь по иерархии: {result['path_text']}")
+    if result.get("lca_id"):
+        layer = "по is-a" if result["lca_layer"] == "isa" else "по частям/целому"
+        print(f"  LCA ({layer}): [{result['lca_id']}] {result['lca_term']}  "
+              f"(глубина {result['depth_lca']}; до C1: {result['distance_1']}, до C2: {result['distance_2']})")
+        if result["wu_palmer"]:
+            print(f"  Ву–Палмер по is-a: {result['wu_palmer']}")
+    p = result["similarity_parts"]
+    print(f"  Близость: {result['semantic_similarity']} — {result['similarity_level']}  "
+          f"[иерархия {p['hierarchy']} · связи {p['context']} · лексика {p['lexical']}]")
+
+    links = result.get("direct_links", [])
+    if len(links) == 2 and links[0]["relation"] == links[1]["relation"]:      # симметричная связь
+        print(f"  Прямая связь: «{links[0]['from_term']}» ⇄ «{links[0]['to_term']}»: {links[0]['relation']}")
+    else:
+        for link in links:
+            print(f"  Прямая связь: «{link['from_term']}» —{link['relation']}→ «{link['to_term']}»")
+    if result.get("contrasted"):
+        print("  ⚠ В базе знаний эти понятия прямо противопоставлены.")
+
+    com = result["common"]
+    print("\n  ОБЩЕЕ")
+    shown = False
+    if com["same_topic"]:
+        print(f"    • один раздел: {com['topic_id']}"); shown = True
+    if len(result["common_ancestors"]) > 1 or (result["common_ancestors"] and result["relationship"] in ("siblings", "cousins", "common_whole")):
+        print("    • общие предки: " + ", ".join(a["term"] for a in result["common_ancestors"])); shown = True
+    if com["relation_types"]:
+        print("    • одинаково описаны через: " + ", ".join(com["relation_types"])); shown = True
+    if com["linked_concepts"]:
+        print("    • общие связи: " + ", ".join(c["term"] for c in com["linked_concepts"])); shown = True
+    if com["keywords"]:
+        print("    • общие слова определений: " + ", ".join(com["keywords"])); shown = True
+    if not shown:
+        print("    — явного сходства в базе знаний не найдено")
+
+    print("\n  РАЗЛИЧИЯ")
+    for n in ("1", "2"):
+        d = result["differences"][f"concept_{n}"]
+        print(f"    [{d['concept_id']}] {d['term']}  ({d['topic_id']}: {d['topic_title']})")
+        if d["definition"]:
+            print(_wrap(d["definition"]))
+        if d["superclasses"]:
+            print(f"      Надкласс: {', '.join(d['superclasses'])}")
+        if d["subclasses"]:
+            print(f"      Подклассы: {', '.join(d['subclasses'])}")
+        if d["parts"]:
+            print(f"      Состоит из: {', '.join(d['parts'])}")
+        if d["examples"]:
+            print(f"      Пример: {d['examples'][0][:110]}")
+        if d["distinctive_words"]:
+            print(f"      Только здесь: {', '.join(d['distinctive_words'])}")
+
+    print(f"\n  КАК НЕ ПЕРЕПУТАТЬ\n{_wrap(result['tip'], '    ')}")
+    study = result["study"]
+    print("\n  ПОРЯДОК ИЗУЧЕНИЯ: " + " → ".join(f"{x['term']}" for x in study["order"]))
+    if study["labs"]:
+        print(f"  Лабораторные работы: {', '.join(study['labs'])}")
 
 
 #=================================================================
@@ -239,7 +351,8 @@ def run_scenario4(router: SolverRouter):
     target = input("  Введите целевой концепт (ID или термин, например C042): ").strip()
     student = input("  Ваше имя или псевдоним (для статистики группы): ").strip()
 
-    resp = router.handle_request({"action": "diagnose", "params": {"target": target}})
+    resp, params = request_with_choice(router, "diagnose", {"target": target})
+    target = params["target"]                # мог быть уточнён выбором ID
     if resp["status"] == "error":
         print_router_error(resp)
         return
@@ -270,7 +383,7 @@ def run_scenario5(router: SolverRouter):
     missing_input = input("  Введите список проблемных ID через запятую (например, CL152,CL153): ").strip()
     missing_ids = [m.strip() for m in missing_input.split(",") if m.strip()]
 
-    resp = router.handle_request({"action": "plan", "params": {"gaps": missing_ids}})
+    resp, _ = request_with_choice(router, "plan", {"gaps": missing_ids})
     if resp["status"] == "error":
         print_router_error(resp)
         return
@@ -328,16 +441,25 @@ def run_scenario5(router: SolverRouter):
 #=================================================================
 
 def run_scenario6(router: SolverRouter):
-    """Семантическое сравнение двух концептов (LCA) через роутер."""
-    print_separator("СЦЕНАРИЙ 6: СЕМАНТИЧЕСКИЙ КОМПАРАТОР (LCA) [Студент]")
-    print("  Можно вводить как ID (например, C040), так и название термина.\n")
-    c1 = input("  Введите первый концепт: ").strip()
-    c2 = input("  Введите второй концепт: ").strip()
-    resp = router.handle_request({"action": "compare", "params": {"concept_1": c1, "concept_2": c2}})
-    if resp["status"] == "error":
-        print_router_error(resp)
-    else:
-        _show_comparator_result(resp["data"])
+    """Сравнение двух понятий: «чем отличаются A и B» (через роутер)."""
+    print_separator("СЦЕНАРИЙ 6: ЧЕМ ОТЛИЧАЮТСЯ ПОНЯТИЯ? [Студент]")
+    print("  Понятия можно вводить как ID (C040), так и термином. Пустой ввод — назад в меню.\n")
+    while True:
+        try:
+            c1 = input("  Первое понятие: ").strip()
+            if not c1:
+                return
+            c2 = input("  Второе понятие: ").strip()
+            if not c2:
+                return
+        except (KeyboardInterrupt, EOFError):
+            return
+        resp, _ = request_with_choice(router, "compare", {"concept_1": c1, "concept_2": c2})
+        if resp["status"] == "error":
+            print_router_error(resp)
+        else:
+            _show_comparator_result(resp["data"])
+        print()
 
 #=================================================================
 #СЦЕНАРИЙ 7 — Администрирование и валидация БЗ (Ксюша, через роутер)
@@ -407,7 +529,7 @@ def print_menu():
     print("  3 — Интеллектуальный ассистент")
     print("  4 — Адаптивная диагностика пробелов")
     print("  5 — Построение траектории и рекомендации")
-    print("  6 — Семантический компаратор / LCA")
+    print("  6 — Сравнение двух понятий (чем отличаются)")
     print("\n  --- Функционал для Преподавателя ---")
     print("  7 — Администрирование и валидация базы знаний")
     print("  8 — Аналитика успеваемости и выявление пробелов")

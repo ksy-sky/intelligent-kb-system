@@ -128,9 +128,11 @@ class SolverRouter:
         return "success", {"plan": plan, "recommendations": recs}, f"Шагов в плане: {len(plan)}."
 
     def _compare(self, p):
-        """Сценарий 6. concept_1, concept_2 — ID или термины."""
+        """Сценарий 6: concept_1, concept_2 — ID или термины."""
         c1, c2 = self._concept(p, "concept_1"), self._concept(p, "concept_2")
         result = self.solvers["compare"].compare_by_id(c1, c2)
+        if result.get("status") == "error":
+            raise RouterError("COMPARE_FAILED", result.get("message", "Не удалось сравнить понятия"), result)
         return "success", result, result.get("message", "")
 
     def _analytics(self, p, warnings):
@@ -203,9 +205,23 @@ class SolverRouter:
             return hits[0]["concept_id"]
         if len(hits) > 1:
             raise RouterError("AMBIGUOUS_CONCEPT", f"Термину «{v}» соответствует несколько концептов",
-                              {"candidates": [{"concept_id": h["concept_id"], "topic_id": h.get("topic_id")} for h in hits]})
+                              {"param": name, "value": v, "candidates": [self._candidate(h) for h in hits]})
         similar = difflib.get_close_matches(v.lower(), list(self.loader.concepts_by_term), n=5, cutoff=0.6)
         raise RouterError("CONCEPT_NOT_FOUND", f"Концепт «{v}» не найден в базе знаний", {"similar": similar})
+
+    def _candidate(self, concept: dict) -> dict:
+        """Описание одного из омонимов, чтобы пользователь мог выбрать нужный ID."""
+        tid = concept.get("topic_id", "")
+        title = (getattr(self.loader, "topics_index", {}) or {}).get(tid, {}).get("title", "")
+        definition = (concept.get("definition") or "").strip()
+        return {
+            "concept_id": concept["concept_id"],
+            "term": concept.get("term", ""),
+            "topic_id": tid,
+            "topic_title": title,
+            "source": "лабораторный практикум" if str(tid).startswith("L") else "теория",
+            "definition": definition[:140] + ("…" if len(definition) > 140 else ""),
+        }
 
     # ======================================================== утилиты
     def _collect_ids(self, data) -> set:
