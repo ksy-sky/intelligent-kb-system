@@ -7,7 +7,8 @@ solver_trajectory.py — Решатель построения учебной т
      знаний, транзитивно зависящих от данного — вычисляется собственным
      обходом в глубину, без внешних графовых библиотек).
   2. Формирование объяснения включения понятия в план в виде полного
-     пути от понятия до целевого концепта (поиск в ширину вручную).
+     пути от понятия до целевого концепта (поиск в ширину вручную,
+     без учёта направления рёбер — показывает факт связности понятий).
   3. Формирование контекстных рекомендаций по материалам, с эвристическим
      TF-IDF поиском похожих понятий как запасным механизмом для
      концептов с пустыми relations в базе знаний.
@@ -25,7 +26,7 @@ DEPENDENCY_RELATION_TYPES = ["надкласс", "надклассы", "испо
 
 
 class TrajectorySolver:
-    #Решатель для построения индивидуальной учебной траектории и рекомендаций
+    """Решатель для построения индивидуальной учебной траектории и рекомендаций."""
 
     def __init__(self, loader):
         self.loader = loader
@@ -33,8 +34,9 @@ class TrajectorySolver:
         # которых cid является пререквизитом (рёбра "вперёд", cid -> dependents)
         self._forward_graph: Optional[Dict[str, List[str]]] = None
 
-
+    # ------------------------------------------------------------------ #
     #  Построение и кэширование полного графа зависимостей базы знаний
+    # ------------------------------------------------------------------ #
 
     def _get_full_graph(self) -> Dict[str, List[str]]:
         """
@@ -59,6 +61,7 @@ class TrajectorySolver:
         return graph
 
     def invalidate_cache(self) -> None:
+        """Сбрасывает кэш графа (вызывать после перезагрузки/изменения БЗ)."""
         self._forward_graph = None
 
     def _count_descendants(self, cid: str, graph: Dict[str, List[str]]) -> int:
@@ -79,7 +82,9 @@ class TrajectorySolver:
 
         return len(visited)
 
+    # ------------------------------------------------------------------ #
     #  Построение учебной траектории (алгоритм Кана, вручную)
+    # ------------------------------------------------------------------ #
 
     def build_learning_plan(
         self,
@@ -89,11 +94,15 @@ class TrajectorySolver:
         """
         Построение упорядоченного плана изучения на основе множества пробелов.
 
+        Если задан target_concept_id, набор пробелов автоматически дополняется
+        промежуточными понятиями, лежащими на пути от каждого пробела до цели
+        (поиск без учёта направления рёбер), а также самой целью — так цель
+        не просто поясняется в тексте, а реально входит в итоговый план как
+        его завершающий шаг.
+
         Args:
             gap_ids: список идентификаторов концептов, которые необходимо изучить
-            target_concept_id: опциональный целевой концепт — если задан,
-                объяснение включения каждого шага строится как путь до цели,
-                иначе используется ранг критичности
+            target_concept_id: опциональный целевой концепт
 
         Returns:
             упорядоченный список словарей вида
@@ -108,26 +117,28 @@ class TrajectorySolver:
 
         full_graph = self._get_full_graph()
 
+        # Если указана цель — расширяем набор пробелов промежуточными понятиями
+        # на пути до неё, и добавляем саму цель как завершающий шаг плана
+        target_requested = bool(target_concept_id and target_concept_id in full_graph)
+        if target_requested:
+            valid_gaps = self._expand_with_target_path(valid_gaps, target_concept_id, full_graph)
+
         # Этап 1: построение локального подграфа только для вершин пробелов
         local_graph = self._build_subgraph(valid_gaps, full_graph)
 
         # Этап 2: вычисление входящих степеней
         in_degree = {cid: 0 for cid in valid_gaps}
-        for src, neighbors in local_graph.items():
-            for dst in neighbors:
+        for src, neighbors_ in local_graph.items():
+            for dst in neighbors_:
                 if dst in in_degree:
                     in_degree[dst] += 1
 
         queue = sorted([cid for cid, deg in in_degree.items() if deg == 0])
 
-        # Критичность: сколько понятий во ВСЕЙ базе знаний транзитивно
-        # зависят от данного концепта (считается по полному графу, не
-        # по локальному подграфу пробелов)
         criticality = {cid: self._count_descendants(cid, full_graph) for cid in valid_gaps}
 
         trajectory = []
 
-        # Этап 3: алгоритм Кана
         while queue:
             curr_cid = queue.pop(0)
             concept = self.loader.concepts_by_id[curr_cid]
@@ -156,7 +167,7 @@ class TrajectorySolver:
             raise ValueError(f"Обнаружен цикл в пререквизитах среди концептов: {cycle_nodes}")
 
         return trajectory
-
+    
     def _build_subgraph(
         self, node_ids: List[str], full_graph: Dict[str, List[str]]
     ) -> Dict[str, List[str]]:
@@ -175,13 +186,38 @@ class TrajectorySolver:
 
         return graph
 
+    def _expand_with_target_path(
+        self,
+        gap_ids: List[str],
+        target_concept_id: str,
+        full_graph: Dict[str, List[str]],
+    ) -> List[str]:
+        """
+        Дополняет множество пробелов промежуточными понятиями, лежащими на
+        пути (без учёта направления рёбер) от каждого пробела до целевого
+        концепта, а также самим целевым концептом. Если путь до цели от
+        какого-то пробела не найден — тот пробел остаётся в наборе как есть,
+        без расширения (цель в этом случае просто не окажется связанной с
+        ним топологически).
+        """
+        expanded = set(gap_ids)
+        expanded.add(target_concept_id)
+
+        for gid in gap_ids:
+            path = self._find_path_bfs_undirected(gid, target_concept_id, full_graph)
+            if path:
+                expanded.update(path)
+
+        return list(expanded)
+
     def _find_path_bfs(
         self, start: str, target: str, graph: Dict[str, List[str]]
     ) -> Optional[List[str]]:
         """
-        Поиск кратчайшего пути от start до target в графе зависимостей
-        собственной реализацией поиска в ширину (BFS), с восстановлением
-        пути через словарь предшественников.
+        Поиск кратчайшего пути от start до target СТРОГО ПО НАПРАВЛЕНИЮ
+        рёбер графа зависимостей (только "пререквизит -> потомок").
+        Оставлен для случаев, когда важно именно направленное отношение
+        (например, если понадобится в других решателях).
         """
         if start == target:
             return [start]
@@ -207,6 +243,49 @@ class TrajectorySolver:
 
         return None  # пути не существует
 
+    def _find_path_bfs_undirected(
+        self, start: str, target: str, graph: Dict[str, List[str]]
+    ) -> Optional[List[str]]:
+        """
+        Поиск кратчайшего пути между start и target БЕЗ учёта направления
+        рёбер — показывает факт связности двух понятий в графе зависимостей
+        (через общих предков/потомков в любую сторону), а не только узкое
+        отношение "пререквизит -> потомок" в одну сторону. Используется
+        для объяснения "путь к цели" при указанном target_concept_id.
+        """
+        if start == target:
+            return [start]
+
+        # Строим обратный граф один раз и объединяем смежность в обе стороны
+        reverse: Dict[str, List[str]] = {}
+        for src, targets in graph.items():
+            for dst in targets:
+                reverse.setdefault(dst, []).append(src)
+
+        def neighbors(node: str) -> List[str]:
+            return graph.get(node, []) + reverse.get(node, [])
+
+        visited = {start}
+        queue = deque([start])
+        predecessor: Dict[str, str] = {}
+
+        while queue:
+            node = queue.popleft()
+            for neighbor in neighbors(node):
+                if neighbor in visited:
+                    continue
+                visited.add(neighbor)
+                predecessor[neighbor] = node
+                if neighbor == target:
+                    path = [target]
+                    while path[-1] != start:
+                        path.append(predecessor[path[-1]])
+                    path.reverse()
+                    return path
+                queue.append(neighbor)
+
+        return None  # понятия находятся в несвязанных ветках графа
+
     def _generate_reason(
         self,
         cid: str,
@@ -219,16 +298,22 @@ class TrajectorySolver:
         """
         Формирует объяснение включения концепта в план.
 
-        Если задан target_concept_id и до него существует путь — строится
-        полная цепочка понятий от cid до цели (поиск в ширину вручную).
-        Иначе используется ранг критичности (число зависимых понятий во
-        всей базе знаний) и прямые потомки в локальном подграфе.
+        Если задан target_concept_id — ищется путь до цели без учёта
+        направления рёбер (_find_path_bfs_undirected). Если путь найден —
+        он показывается явно. Если цель задана, но путь не найден — это
+        явно сообщается (а не маскируется под общую критичность). Если
+        цель не задана вовсе — используется ранг критичности и прямые
+        потомки в локальном подграфе пробелов.
         """
+        target_requested = bool(target_concept_id)
+        path_found = False
+
         if target_concept_id and target_concept_id in full_graph:
             if cid == target_concept_id:
                 return "Целевой концепт"
-            path = self._find_path_bfs(cid, target_concept_id, full_graph)
+            path = self._find_path_bfs_undirected(cid, target_concept_id, full_graph)
             if path:
+                path_found = True
                 path_terms = [
                     self.loader.concepts_by_id[p].get("term", p) for p in path
                 ]
@@ -238,6 +323,13 @@ class TrajectorySolver:
         valid_dependents = [d for d in dependents if d in in_degree and in_degree[d] > 0]
         crit = criticality.get(cid, 0)
 
+        prefix = ""
+        if target_requested and not path_found:
+            target_term = self.loader.concepts_by_id.get(target_concept_id, {}).get(
+                "term", target_concept_id
+            )
+            prefix = f"Прямого пути к «{target_term}» в базе знаний не найдено. "
+
         if valid_dependents:
             dep_terms = [
                 self.loader.concepts_by_id.get(d, {}).get("term", d)
@@ -245,14 +337,16 @@ class TrajectorySolver:
             ]
             deps_str = ", ".join(dep_terms)
             crit_note = f" (критичность: от него зависит {crit} понятий)" if crit else ""
-            return f"Необходим для изучения: {deps_str}{crit_note}"
+            return f"{prefix}Необходим для изучения: {deps_str}{crit_note}"
 
         if crit > 0:
-            return f"Базовое понятие дисциплины (от него зависит {crit} понятий во всей БЗ)"
+            return f"{prefix}Базовое понятие дисциплины (от него зависит {crit} понятий во всей БЗ)"
 
-        return "Базовый концепт / не имеет зависимых понятий в базе знаний"
+        return f"{prefix}Базовый концепт / не имеет зависимых понятий в базе знаний"
 
+    # ------------------------------------------------------------------ #
     #  Формирование рекомендаций по материалам
+    # ------------------------------------------------------------------ #
 
     def generate_recommendations(self, plan: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
@@ -390,7 +484,7 @@ class TrajectorySolver:
     def _find_inherited_definition(
         self, cid: str, max_depth: int = 10
     ) -> Tuple[Optional[str], Optional[str]]:
-        #Поиск определения у ближайшего предка по связям 'надкласс'/'надклассы'.
+        """Поиск определения у ближайшего предка по связям 'надкласс'/'надклассы'."""
         visited = set()
         current = cid
         depth = 0
@@ -426,6 +520,7 @@ class TrajectorySolver:
 
     @staticmethod
     def _insert_sorted(lst: List[str], item: str) -> None:
+        """Вставка элемента в отсортированный список с сохранением порядка."""
         lo, hi = 0, len(lst)
         while lo < hi:
             mid = (lo + hi) // 2

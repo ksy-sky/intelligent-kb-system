@@ -125,26 +125,26 @@ class KnowledgeBaseLoader:
         """
         Возвращает список идентификаторов разделов лабораторного практикума
         (topic_id, начинающиеся на 'L'), в концептах которых данный
-        concept_id упоминается как связь (например, 'используется в').
-
-        Это реализует требование «номера лабораторных работ, в которых
-        фигурирует данный концепт» (раздел 2.5.2 ПЗ).
+        concept_id упоминается как связь — ИСКЛЮЧАЯ собственный раздел
+        концепта (если концепт сам находится в лабораторном разделе, не
+        имеет смысла рекомендовать этот же раздел как "связанный").
         """
         if not concept_id or concept_id not in self.concepts_by_id:
             return []
 
+        own_topic = str(self.concepts_by_id[concept_id].get("topic_id", ""))
         related_topics: Set[str] = set()
 
         for other_cid, other_concept in self.concepts_by_id.items():
             other_tid = str(other_concept.get("topic_id", ""))
-            if not other_tid.startswith("L"):
-                continue  # интересуют только лабораторные концепты
+            if not other_tid.startswith("L") or other_tid == own_topic:
+                continue  # пропускаем не-лабы и собственный раздел концепта
 
             relations = other_concept.get("relations", {})
             for targets in relations.values():
                 if concept_id in targets:
                     related_topics.add(other_tid)
-                    break  # достаточно одного совпадения на концепт
+                    break
 
         return sorted(related_topics)
 
