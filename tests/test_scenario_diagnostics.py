@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from src.solver_diagnostics import (DiagnosticsSolver, Question, get_missing_prerequisites,
                                     STATUS_ERROR, STATUS_NO_PREREQ, STATUS_PLAN, STATUS_READY)
 from src.solver_router import SolverRouter
+from src.solver_analytics import AnalyticsSolver
 from src import results_store
 from tests.kb_fixtures import FakeLoader, make_concepts
 
@@ -362,6 +363,178 @@ class TestDiagnoseOnRealKB(unittest.TestCase):
                 self.assertEqual(len(data["gaps"]), len(resp["data"]["questions"]))
                 return
         self.fail("в БЗ не нашлось ни одной цели с пререквизитами")
+
+
+class TestAnalyticsSolver(unittest.TestCase):
+    """Сценарий 8: AnalyticsSolver.analyze_gaps — групповые пробелы."""
+
+    def setUp(self):
+        self.solver = AnalyticsSolver(FakeLoader())
+
+    def test_no_students_gives_empty_result(self):
+        self.assertEqual(self.solver.analyze_gaps([], ["C001", "C002"]), [])
+
+    def test_no_targets_gives_empty_result(self):
+        self.assertEqual(self.solver.analyze_gaps([{"C001"}, set()], []), [])
+
+    def test_ratio_threshold_and_ranking(self):
+        models = [{"C001"}, {"C001", "C002"}]
+        rows = self.solver.analyze_gaps(models, ["C001", "C002", "C003"], 0.5)
+        self.assertEqual([r["concept_id"] for r in rows], ["C003", "C002"])     # C001 освоен всеми
+        self.assertEqual(rows[0]["gap_ratio"], 1.0)
+        self.assertEqual(rows[0]["students_with_gap"], 2)
+        self.assertEqual(rows[1]["gap_ratio"], 0.5)                                 # порог включительный
+        self.assertEqual(rows[1]["students_with_gap"], 1)
+        self.assertTrue(all(r["total_students"] == 2 for r in rows))
+
+    def test_default_threshold_is_half(self):
+        rows = self.solver.analyze_gaps([{"C001"}, set(), set()], ["C001"])
+        self.assertEqual([r["concept_id"] for r in rows], ["C001"])               # 2/3 >= 0.5
+        self.assertEqual(self.solver.analyze_gaps([{"C001"}, {"C001"}, set()], ["C001"]), [])   # 1/3 < 0.5
+
+    def test_threshold_zero_returns_everything_and_one_only_total_gaps(self):
+        models = [{"C001"}, set()]
+        everything = self.solver.analyze_gaps(models, ["C001", "C002"], 0)
+        self.assertEqual([(r["concept_id"], r["gap_ratio"]) for r in everything], [("C002", 1.0), ("C001", 0.5)])
+        total = self.solver.analyze_gaps(models, ["C001", "C002"], 1)
+        self.assertEqual([r["concept_id"] for r in total], ["C002"])
+
+    def test_threshold_zero_includes_fully_mastered(self):
+        rows = self.solver.analyze_gaps([{"C001"}], ["C001"], 0)
+        self.assertEqual(rows[0]["gap_ratio"], 0.0)
+
+    def test_ties_sorted_by_concept_id(self):
+        rows = self.solver.analyze_gaps([set()], ["C003", "C001", "C002"], 0.5)
+        self.assertEqual([r["concept_id"] for r in rows], ["C001", "C002", "C003"])
+
+    def test_ratio_is_rounded_to_two_digits(self):
+        rows = self.solver.analyze_gaps([set(), {"C001"}, {"C001"}], ["C001"], 0.1)
+        self.assertEqual(rows[0]["gap_ratio"], 0.33)
+
+    def test_rows_are_enriched_from_kb(self):
+        row = self.solver.analyze_gaps([set()], ["C004"])[0]
+        self.assertEqual(row["term"], "Факт")
+        self.assertEqual(row["topic_id"], "T01")
+
+    def test_unknown_concept_gets_placeholders(self):
+        row = self.solver.analyze_gaps([set()], ["C999"])[0]
+        self.assertEqual((row["term"], row["topic_id"]), ("Unknown", "Unknown"))
+
+    def test_models_may_be_lists_and_extra_concepts_are_ignored(self):
+        rows = self.solver.analyze_gaps([["C001", "C777"], ["C001"]], ["C001", "C002"], 0.5)
+        self.assertEqual([r["concept_id"] for r in rows], ["C002"])
+
+    def test_duplicate_targets_are_counted_once(self):
+        rows = self.solver.analyze_gaps([set()], ["C001", "C001"])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["students_with_gap"], 1)
+
+    def test_input_is_not_mutated(self):
+        models = [{"C001"}]
+        targets = ["C001", "C002"]
+        self.solver.analyze_gaps(models, targets)
+        self.assertEqual(models, [{"C001"}])
+        self.assertEqual(targets, ["C001", "C002"])
+
+
+class TestAnalyticsThroughRouter(unittest.TestCase):
+    """Действие analytics через API-шлюз (страница «Аналитика»)."""
+
+    def setUp(self):
+        self.router = SolverRouter(FakeLoader())
+
+    def req(self, params):
+        return self.router.handle_request({"action": "analytics", "params": params})
+
+    def code(self, params):
+        resp = self.req(params)
+        self.assertEqual(resp["status"], "error", resp)
+        return resp["error"]["code"]
+
+    def test_success_with_ids(self):
+        resp = self.req({"student_models": [["C001"], []], "target_concepts": ["C001", "C002"]})
+        self.assertEqual(resp["status"], "success")
+        self.assertEqual([r["concept_id"] for r in resp["data"]], ["C002", "C001"])   # 1.0 раньше 0.5
+        self.assertEqual(resp["data"][1]["gap_ratio"], 0.5)
+        self.assertEqual(resp["explanation"]["summary"], "Концептов с долей пробелов ≥ 0.5: 2.")
+        self.assertEqual(resp["explanation"]["used_concepts"], ["C001", "C002"])
+        self.assertEqual(resp["metadata"]["warnings"], [])
+
+    def test_targets_may_be_terms(self):
+        resp = self.req({"student_models": [[]], "target_concepts": ["Данные", "c002"]})
+        self.assertEqual(resp["status"], "success")
+        self.assertEqual([r["concept_id"] for r in resp["data"]], ["C001", "C002"])
+
+    def test_models_may_be_tuples_and_sets(self):
+        resp = self.req({"student_models": (("C001",), {"C001"}, frozenset()), "target_concepts": ["C001"], "threshold": 0.3})
+        self.assertEqual(resp["status"], "success")
+        self.assertEqual(resp["data"][0]["students_with_gap"], 1)
+        self.assertEqual(resp["data"][0]["total_students"], 3)
+
+    def test_no_gaps_above_threshold(self):
+        resp = self.req({"student_models": [["C001"], ["C001"]], "target_concepts": ["C001"]})
+        self.assertEqual(resp["status"], "success")
+        self.assertEqual(resp["data"], [])
+        self.assertIn("не выявлено", resp["explanation"]["summary"])
+
+    def test_empty_group(self):
+        resp = self.req({"student_models": [], "target_concepts": ["C001"]})
+        self.assertEqual(resp["status"], "success")
+        self.assertEqual(resp["data"], [])
+
+    def test_threshold_is_applied(self):
+        params = {"student_models": [["C001"], []], "target_concepts": ["C001"]}
+        self.assertEqual(len(self.req({**params, "threshold": 0.5})["data"]), 1)
+        self.assertEqual(self.req({**params, "threshold": 0.9})["data"], [])
+        self.assertEqual(len(self.req({**params, "threshold": 0})["data"]), 1)
+        self.assertEqual(self.req({**params, "threshold": 1})["data"], [])       # границы допустимы (int)
+
+    def test_unknown_concepts_in_models_are_dropped_with_warning(self):
+        resp = self.req({"student_models": [["C001", "C999", 5], ["C001"]], "target_concepts": ["C001", "C002"]})
+        self.assertEqual(resp["status"], "success")
+        self.assertEqual(len(resp["metadata"]["warnings"]), 1)
+        self.assertIn("student_models[0]", resp["metadata"]["warnings"][0])
+        self.assertEqual([r["concept_id"] for r in resp["data"]], ["C002"])
+
+    def test_missing_params(self):
+        self.assertEqual(self.code({"target_concepts": ["C001"]}), "MISSING_PARAM")
+        self.assertEqual(self.code({"student_models": [[]]}), "MISSING_PARAM")
+        self.assertEqual(self.code({}), "MISSING_PARAM")
+
+    def test_bad_student_models_type(self):
+        targets = {"target_concepts": ["C001"]}
+        for bad in ("C001", {"C001": 1}, 5, ["C001"], [b"C001"], [["C001"], "C002"], [None], [5]):
+            self.assertEqual(self.code({"student_models": bad, **targets}), "BAD_PARAM_TYPE", bad)
+
+    def test_bad_target_concepts(self):
+        self.assertEqual(self.code({"student_models": [[]], "target_concepts": "C001"}), "BAD_PARAM_TYPE")
+        self.assertEqual(self.code({"student_models": [[]], "target_concepts": ["C999"]}), "CONCEPT_NOT_FOUND")
+        self.assertEqual(self.code({"student_models": [[]], "target_concepts": ["C9"]}), "BAD_ID_FORMAT")
+        self.assertEqual(self.code({"student_models": [[]], "target_concepts": ["Ссылка"]}), "AMBIGUOUS_CONCEPT")
+
+    def test_bad_threshold_type(self):
+        base = {"student_models": [[]], "target_concepts": ["C001"]}
+        for bad in ("0.5", True, None, [0.5], {"t": 1}):
+            self.assertEqual(self.code({**base, "threshold": bad}), "BAD_PARAM_TYPE", bad)
+
+    def test_bad_threshold_value(self):
+        base = {"student_models": [[]], "target_concepts": ["C001"]}
+        for bad in (-0.1, 1.01, 5, -1):
+            self.assertEqual(self.code({**base, "threshold": bad}), "BAD_PARAM_VALUE", bad)
+
+    def test_duplicate_targets_collapsed(self):
+        resp = self.req({"student_models": [[]], "target_concepts": ["C001", "Данные", "c001"]})
+        self.assertEqual(len(resp["data"]), 1)
+
+    def test_roundtrip_from_results_store(self):
+        """Параметры, собранные results_store, принимаются шлюзом."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "diag.jsonl")
+            results_store.save_diagnostic("Аня", DiagnosticsSolver(FakeLoader()).run("C004", {}), path)
+            params = results_store.to_analytics_params(results_store.load_latest(None, path), 0.4)
+        resp = self.req(params)
+        self.assertEqual(resp["status"], "success", resp)
+        self.assertCountEqual([r["concept_id"] for r in resp["data"]], ["C001", "C002", "C006"])
 
 
 if __name__ == "__main__":
