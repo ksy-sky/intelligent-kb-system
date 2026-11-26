@@ -6,7 +6,7 @@ import unittest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from src.solver_comparator import ComparatorSolver
-from src.solver_router import SolverRouter
+from src.solver_router import RouterError, SolverRouter
 from tests.kb_fixtures import FakeLoader, make_concepts
 
 
@@ -296,6 +296,184 @@ class TestCompareOnRealKB(unittest.TestCase):
         r1 = self.router.handle_request({"action": "compare", "params": {"concept_1": a, "concept_2": b}})
         r2 = self.router.handle_request({"action": "compare", "params": {"concept_1": b, "concept_2": a}})
         self.assertEqual(r1["data"]["semantic_similarity"], r2["data"]["semantic_similarity"])
+
+
+class TestRouterGateway(unittest.TestCase):
+    """Общие свойства API-шлюза: формат запроса, подключение решателей, обработка сбоев."""
+
+    def setUp(self):
+        self.router = SolverRouter(FakeLoader())
+
+    def req(self, request):
+        return self.router.handle_request(request)
+
+    # ------------------------------------------------------------ формат запроса
+    def test_request_must_be_a_dict(self):
+        for bad in (None, "compare", 42, [], ["compare"]):
+            resp = self.req(bad)
+            self.assertEqual(resp["status"], "error", bad)
+            self.assertEqual(resp["error"]["code"], "BAD_REQUEST", bad)
+            self.assertIsNone(resp["action"])
+
+    def test_params_must_be_an_object(self):
+        resp = self.req({"action": "compare", "params": ["C001", "C002"]})
+        self.assertEqual(resp["error"]["code"], "BAD_REQUEST")
+        self.assertEqual(resp["action"], "compare")
+
+    def test_missing_or_empty_params_are_treated_as_empty(self):
+        for request in ({"action": "compare"}, {"action": "compare", "params": None}, {"action": "compare", "params": {}}):
+            self.assertEqual(self.req(request)["error"]["code"], "MISSING_PARAM")
+
+    def test_unknown_action_lists_available_ones(self):
+        err = self.req({"action": "nope", "params": {}})["error"]
+        self.assertEqual(err["code"], "UNKNOWN_ACTION")
+        self.assertEqual(err["details"]["available_actions"], ["diagnose", "plan", "compare", "admin", "analytics"])
+        self.assertEqual(self.req({"params": {}})["error"]["code"], "UNKNOWN_ACTION")      # action не задан
+
+    def test_response_envelope(self):
+        resp = self.req({"action": "compare", "params": {"concept_1": "C002", "concept_2": "C003"}})
+        self.assertEqual(set(resp), {"status", "action", "data", "explanation", "error", "metadata"})
+        self.assertEqual(resp["metadata"]["kb_concepts"], len(self.router.loader.concepts_by_id))
+        self.assertEqual(resp["metadata"]["warnings"], [])
+        self.assertGreaterEqual(resp["metadata"]["elapsed_ms"], 0)
+        self.assertIn("C001", resp["explanation"]["used_concepts"])
+        self.assertIsNone(resp["error"])
+
+    # ------------------------------------------------------ подключение решателей
+    def test_all_solvers_are_connected(self):
+        self.assertEqual(set(self.router.solvers), {"diagnose", "plan", "compare", "admin", "analytics"})
+
+    def test_unavailable_solver(self):
+        del self.router.solvers["compare"]
+        resp = self.req({"action": "compare", "params": {"concept_1": "C001", "concept_2": "C002"}})
+        self.assertEqual(resp["status"], "error")
+        self.assertEqual(resp["error"]["code"], "SOLVER_UNAVAILABLE")
+        self.assertIn("compare", resp["error"]["message"])
+
+    def test_broken_module_is_skipped_with_warning(self):
+        router = SolverRouter(FakeLoader())
+        router.solvers.clear()
+        with self.assertLogs("src.solver_router", level="WARNING") as logs:
+            router._load("compare", "module_that_does_not_exist", "ComparatorSolver")
+        self.assertNotIn("compare", router.solvers)
+        self.assertIn("не подключён", logs.output[0])
+
+    def test_broken_class_name_or_constructor_is_skipped(self):
+        router = SolverRouter(FakeLoader())
+        router.solvers.clear()
+        with self.assertLogs("src.solver_router", level="WARNING"):
+            router._load("compare", "solver_comparator", "NoSuchClass")
+            router._load("plan", "solver_trajectory", "TrajectorySolver", "лишний", "аргумент", "тут")
+        self.assertEqual(router.solvers, {})
+        router._load("compare", "solver_comparator", "ComparatorSolver", FakeLoader())     # нормальное подключение
+        self.assertIn("compare", router.solvers)
+
+    # ------------------------------------------------------------- сбои решателей
+    def test_internal_error_is_reported_not_raised(self):
+        def boom(*_):
+            raise RuntimeError("boom")
+
+        self.router.solvers["compare"].compare_by_id = boom
+        with self.assertLogs("src.solver_router", level="ERROR"):
+            resp = self.req({"action": "compare", "params": {"concept_1": "C001", "concept_2": "C002"}})
+        self.assertEqual(resp["status"], "error")
+        self.assertEqual(resp["error"]["code"], "INTERNAL_ERROR")
+        self.assertIn("RuntimeError: boom", resp["error"]["details"])
+        self.assertIsNone(resp["data"])
+
+    def test_internal_error_in_analytics_and_admin(self):
+        def boom(*_, **__):
+            raise ValueError("сломано")
+
+        self.router.solvers["analytics"].analyze_gaps = boom
+        self.router.solvers["admin"].run_validation = boom
+        with self.assertLogs("src.solver_router", level="ERROR"):
+            a = self.req({"action": "analytics", "params": {"student_models": [[]], "target_concepts": ["C001"]}})
+            b = self.req({"action": "admin", "params": {}})
+        self.assertEqual(a["error"]["code"], "INTERNAL_ERROR")
+        self.assertEqual(b["error"]["code"], "INTERNAL_ERROR")
+
+    def test_compare_failure_is_wrapped(self):
+        failure = {"status": "error", "message": "нет общего предка"}
+        self.router.solvers["compare"].compare_by_id = lambda a, b: failure
+        err = self.req({"action": "compare", "params": {"concept_1": "C001", "concept_2": "C002"}})["error"]
+        self.assertEqual(err["code"], "COMPARE_FAILED")
+        self.assertEqual(err["message"], "нет общего предка")
+        self.assertEqual(err["details"], failure)
+
+    def test_compare_failure_without_message_uses_default(self):
+        self.router.solvers["compare"].compare_by_id = lambda a, b: {"status": "error"}
+        err = self.req({"action": "compare", "params": {"concept_1": "C001", "concept_2": "C002"}})["error"]
+        self.assertEqual(err["message"], "Не удалось сравнить понятия")
+
+    # ------------------------------------------------------- валидация параметров
+    def test_concept_list_optional_and_required(self):
+        self.assertEqual(self.router._concept_list({}, "gaps", required=False), [])
+        self.assertEqual(self.router._concept_list({"gaps": None}, "gaps", required=False), [])
+        with self.assertRaises(RouterError) as ctx:
+            self.router._concept_list({}, "gaps")
+        self.assertEqual(ctx.exception.code, "MISSING_PARAM")
+        self.assertEqual(ctx.exception.details, {"missing": "gaps"})
+
+    def test_concept_list_accepts_collections_and_dedups(self):
+        self.assertEqual(self.router._concept_list({"g": ("C002", "Данные", "c002")}, "g"), ["C002", "C001"])
+        self.assertEqual(self.router._concept_list({"g": {"C001"}}, "g"), ["C001"])
+        self.assertEqual(self.router._concept_list({"g": []}, "g"), [])
+
+    def test_concept_list_rejects_non_collections(self):
+        for bad in ("C001", 5, {"C001": 1}):
+            resp = self.req({"action": "plan", "params": {"gaps": bad}})
+            self.assertEqual(resp["error"]["code"], "BAD_PARAM_TYPE", bad)
+
+    def test_resolve_normalizes_ids_and_rejects_empty(self):
+        self.assertEqual(self.router._resolve("x", "  c002 "), "C002")
+        self.assertEqual(self.router._resolve("x", "CL001"), "CL001")
+        self.assertEqual(self.router._resolve("x", "  ФАКТ "), "C004")
+        for bad in ("", "   ", None, 7, ["C001"]):
+            with self.assertRaises(RouterError) as ctx:
+                self.router._resolve("x", bad)
+            self.assertEqual(ctx.exception.code, "BAD_PARAM_TYPE", bad)
+
+    def test_ambiguous_term_describes_candidates(self):
+        err = self.req({"action": "compare", "params": {"concept_1": "Ссылка", "concept_2": "C001"}})["error"]
+        self.assertEqual(err["code"], "AMBIGUOUS_CONCEPT")
+        cands = {c["concept_id"]: c for c in err["details"]["candidates"]}
+        self.assertEqual(set(cands), {"C010", "CL001"})
+        self.assertEqual(cands["C010"]["source"], "теория")
+        self.assertEqual(cands["CL001"]["source"], "лабораторный практикум")
+        self.assertEqual(cands["C010"]["topic_title"], "Структуры")
+        self.assertEqual(err["details"]["param"], "concept_1")
+
+    def test_candidate_truncates_long_definition_and_tolerates_missing_topics(self):
+        long_def = "а" * 300
+        c = self.router._candidate({"concept_id": "C500", "term": "Т", "topic_id": "T99", "definition": long_def})
+        self.assertEqual(c["definition"], "а" * 140 + "…")
+        self.assertEqual(c["topic_title"], "")                          # темы T99 нет в индексе
+        short = self.router._candidate({"concept_id": "C501", "term": "Т", "topic_id": "T01", "definition": "  кратко  "})
+        self.assertEqual(short["definition"], "кратко")
+        bare = self.router._candidate({"concept_id": "C502"})
+        self.assertEqual((bare["term"], bare["topic_id"], bare["definition"]), ("", "", ""))
+        del self.router.loader.topics_index
+        self.assertEqual(self.router._candidate({"concept_id": "C500", "topic_id": "T01"})["topic_title"], "")
+
+    # ----------------------------------------------------------------- утилиты
+    def test_collect_ids_walks_nested_structures(self):
+        data = {"a": ["C001", {"b": ("C002", "не id")}], "c": {"C003", "C999"}, "d": 5, "e": None}
+        self.assertEqual(self.router._collect_ids(data), {"C001", "C002", "C003"})
+        self.assertEqual(self.router._collect_ids("C004"), {"C004"})
+        self.assertEqual(self.router._collect_ids(None), set())
+
+    def test_used_concepts_are_sorted_and_capped(self):
+        concepts = make_concepts()
+        for i in range(300):
+            cid = f"C{1000 + i}"
+            concepts[cid] = {"concept_id": cid, "term": f"т{i}", "topic_id": "T01", "definition": "", "examples": [], "relations": {}}
+        router = SolverRouter(FakeLoader(concepts))
+        resp = router.handle_request({"action": "analytics", "params": {
+            "student_models": [[]], "target_concepts": [f"C{1000 + i}" for i in range(300)]}})
+        used = resp["explanation"]["used_concepts"]
+        self.assertEqual(len(used), 200)
+        self.assertEqual(used, sorted(used))
 
 
 if __name__ == "__main__":
