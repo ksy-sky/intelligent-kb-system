@@ -4,6 +4,8 @@
 import os
 from typing import Dict, Any
 
+from .kb_validator import KBValidationError
+
 
 class AdminSolver:
     """Решатель для проверки целостности БЗ преподавателем"""
@@ -50,7 +52,7 @@ class AdminSolver:
                 'files_checked': len(json_files)
             }
             
-        except ValueError as e:
+        except KBValidationError as e:
             # Перехватываем ошибки валидации (циклы, дубликаты ID, висячие ссылки)
             return {
                 'status': 'error',
