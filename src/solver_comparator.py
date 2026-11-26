@@ -3,40 +3,45 @@ solver_comparator.py — Решатель «Чем отличаются A и B?�
 
 Роль в системе
 -------------
-Студент часто путает близкие понятия (жадный/ленивый квантификатор, RDF/RDFS,
-данные/информация и т.п.). Компаратор отвечает на вопрос «в чём сходство и
-различие этих двух понятий» и показывает, в каком порядке их изучать.
-Поиск ближайшего общего предка (LCA) — лишь один из шагов, а не весь результат.
+Студент часто путает близкие понятия (жадный/ленивый квантификатор, RDF/RDFS, данные/информация).
+Компаратор отвечает: к какому общему роду относятся два понятия, чем каждое отличается от
+другого и какие характеристики общие, а какие собственные. Это «род и видовое отличие»:
+общий предок (LCA) задаёт род, определение и характеристики каждого понятия — отличие.
 
-Что строится на выходе (сравнительная карточка)
------------------------------------------------
+Сравнительная карточка
+----------------------
 1. Тип родства (relationship): совпадают / надкласс–подкласс / «соседи» / «двоюродные» /
    часть–целое / общее целое / связаны по смыслу / один раздел / не связаны.
-2. LCA, путь через него и мера Ву–Палмера (по иерархии «is-a»).
-3. Общее: общие предки, общие связи, общие ключевые слова определений, разделы и лабы.
-4. Различия: собственная ветка каждого понятия, определение, примеры, отличительные слова.
-5. Явные противопоставления из базы знаний («противопоставляется» и прямые связи).
-6. Рекомендуемый порядок изучения и лабораторные работы.
-7. Итоговая степень близости (0..1) с расшифровкой по составляющим.
+2. LCA, мера Ву–Палмера, пути от предка до каждого понятия (path_1, path_2) и общий путь (path).
+3. Род (genus): определение общего предка — то, что объединяет понятия по природе.
+4. Матрица характеристик (characteristics): строки — виды характеристик из связей БЗ
+   («структура», «синтаксис», «свойства», «преимущества»…), статус каждой строки:
+   common / partly / different / only_1 / only_2.
+5. Унаследованные характеристики (inherited): то, что оба понятия получают от общего предка.
+6. Горизонтальные связи (horizontal): общие связанные понятия, прямые связи и цепочка связей —
+   запасной вариант, когда таксономического родства нет.
+7. Явные противопоставления («противопоставляется»), порядок изучения, лабораторные работы.
+8. Итоговая близость 0..1 = Ву–Палмер + до 30% оставшегося за общие горизонтальные связи
+   (связи только повышают близость, но не снижают её).
 
 Единый граф иерархии
 --------------------
 Связь «надкласс» задана только у части понятий (лабораторные L02/L04/L05). В теории
 (T01–T07) иерархия записана «сверху вниз»: у родителя перечислены подклассы
-(«разбиение*», «семейство подклассов», «виды») или части («составные части»,
-«состав», «включает», …). Поэтому граф строится из двух видов рёбер:
-  * is-a  — «надкласс» (ребёнок → родитель) + инверсия «разбиение*» и аналогов;
-  * part  — инверсия «составные части», «состав», «включает» и аналогов.
-Основной LCA и мера Ву–Палмера считаются только по is-a. Если общего is-a-предка нет,
-используется объединённый граф (is-a + part): тогда говорим об «общем целом».
-Рёбра, создающие цикл, пропускаются (граф всегда ацикличен).
+(«разбиение*», «семейство подклассов», «виды») или части («составные части», «состав», …).
+Граф строится из двух видов рёбер: is-a («надкласс» + инверсия «разбиение*») и part
+(инверсия «составные части» и аналогов). Основной LCA и Ву–Палмер считаются по is-a. Если общего
+is-a-предка нет, используется объединённый граф (is-a + part): «общее целое». Рёбра, создающие
+цикл, пропускаются (граф всегда ацикличен).
 
 Граничные случаи
 ----------------
 * Понятия не найдены → status='error' + подсказки (опечатки).
 * Термин неоднозначен (омонимы теории и лабораторных) → status='error', code='ambiguous'.
-* Одинаковые понятия → status='identical'.
-* Нет ни одной связи → relationship='unrelated' (карточка всё равно содержит различия).
+* Одинаковые понятия → status='identical' (уникальных характеристик нет).
+* Прямой надкласс → предком признаётся сам надкласс.
+* Нет общего предка → сообщение об отсутствии таксономического родства, сравнение по
+  горизонтальным связям; карточка всё равно содержит определения и характеристики.
 """
 import difflib
 import logging
@@ -57,29 +62,26 @@ PART_CHILD_KEYS = {
     "основные элементы", "элементы",
 }
 CONTRAST_KEYS = {"противопоставляется"}
-# Для сравнения «общих связей» эти ключи малоинформативны
-IGNORED_SHARED_KEYS = {"пояснение"}
+# Ключи иерархии (is-a и часть–целое); остальные связи — «горизонтальные»
+STRUCTURAL_KEYS = {REL_SUPERCLASS} | ISA_CHILD_KEYS | PART_CHILD_KEYS
+# Не характеристики понятия: иерархия и противопоставление (оно показывается отдельно)
+HIERARCHY_KEYS = STRUCTURAL_KEYS | CONTRAST_KEYS
+# «пояснение» — свободный текст: показывается отдельно, в матрицу характеристик не входит
+FREE_TEXT_KEYS = {"пояснение"}
+MAX_INHERITED = 8
 
 KIND_ISA = "isa"
 KIND_PART = "part"
 KIND_LABEL = {KIND_ISA: "надкласс", KIND_PART: "часть целого"}
 
-# Веса составляющих итоговой близости
-W_HIERARCHY, W_CONTEXT, W_LEXICAL = 0.6, 0.2, 0.2
-PART_LAYER_PENALTY = 0.7        # Ву–Палмер по объединённому графу (is-a+part) весит меньше
-
-STOPWORDS = {
-    "который", "которые", "которая", "которое", "которых", "также", "этого", "этот", "если",
-    "быть", "есть", "для", "или", "при", "над", "под", "как", "что", "его", "ее", "их",
-    "это", "тот", "такой", "между", "через", "после", "перед", "может", "могут", "используется",
-    "используются", "представляет", "являются", "является", "позволяет", "обычно", "любой",
-    "всех", "всей", "свой", "своих", "другой", "других", "которой", "котором", "только",
-}
+# Составляющие итоговой близости
+CONTEXT_BONUS = 0.3             # доля оставшегося до 1.0, которую могут добавить общие связи
+PART_LAYER_PENALTY = 0.85       # Ву–Палмер по объединённому графу (is-a+part) весит меньше
 
 LEVELS = (
-    (0.70, "практически совпадают"),
-    (0.45, "очень близкие"),
-    (0.25, "родственные"),
+    (0.90, "практически совпадают"),
+    (0.60, "очень близкие"),
+    (0.35, "родственные"),
     (0.08, "слабо связаны"),
     (0.0, "далёкие"),
 )
@@ -106,10 +108,8 @@ class ComparatorSolver:
         self._graph_ready = False
         self._parents: Dict[str, Dict[str, str]] = {}      # ребёнок -> {родитель: вид ребра}
         self._children: Dict[str, Dict[str, str]] = {}     # родитель -> {ребёнок: вид ребра}
-        self._neighbors: Dict[str, Set[str]] = {}          # любые ID-связи, в обе стороны
+        self._neighbors: Dict[str, Set[str]] = {}          # горизонтальные ID-связи, в обе стороны
         self._edge_labels: Dict[Tuple[str, str], str] = {}  # (a, b) -> ключ relations у a
-        self._stems: Dict[str, Dict[str, str]] = {}        # cid -> {стем: слово}
-        self._df: Dict[str, int] = {}                      # стем -> в скольких понятиях встречается
         self._up_cache: Dict[Tuple[str, str], Dict[str, Tuple[int, Optional[str]]]] = {}
         self.skipped_edges: List[Tuple[str, str, str]] = []
         self._homonyms: Set[str] = set()
@@ -155,8 +155,9 @@ class ComparatorSolver:
                     t = str(raw).strip()
                     if t not in self._concepts or t == cid:
                         continue
-                    self._neighbors[cid].add(t)
-                    self._neighbors[t].add(cid)
+                    if not self._is_structural_key(k):          # горизонтальная связь
+                        self._neighbors[cid].add(t)
+                        self._neighbors[t].add(cid)
                     self._edge_labels.setdefault((cid, t), key)
                     if k == REL_SUPERCLASS:
                         explicit.append((cid, t, KIND_ISA))
@@ -174,7 +175,6 @@ class ComparatorSolver:
             t = str(c.get("term", "")).lower()
             counts[t] = counts.get(t, 0) + 1
         self._homonyms = {t for t, n in counts.items() if n > 1}
-        self._build_text_index()
         self._graph_ready = True
 
     def _add_edge(self, child: str, parent: str, kind: str) -> None:
@@ -196,27 +196,6 @@ class ComparatorSolver:
                     seen.add(p)
                     stack.append(p)
         return seen
-
-    # ------------------------------------------------------------------ текстовый индекс
-    @staticmethod
-    def _tokenize(text: str) -> Dict[str, str]:
-        """{стем: слово}. Грубый стемминг: первые 5 букв (русская морфология), без стоп-слов."""
-        out: Dict[str, str] = {}
-        for w in re.findall(r"[а-яёa-z]+", (text or "").lower()):
-            if len(w) < 4 or w in STOPWORDS:
-                continue
-            out.setdefault(w[:5], w)
-        return out
-
-    def _build_text_index(self) -> None:
-        self._stems.clear()
-        df: Dict[str, int] = {}
-        for cid, c in self._concepts.items():
-            stems = self._tokenize(f"{c.get('term', '')} {c.get('definition', '')}")
-            self._stems[cid] = stems
-            for s in stems:
-                df[s] = df.get(s, 0) + 1
-        self._df = df
 
     # ------------------------------------------------------------------ поиск понятий
     def _resolve_all(self, query: str) -> List[str]:
@@ -334,25 +313,29 @@ class ComparatorSolver:
         return 0.0, None, None
 
     def _context_score(self, id1: str, id2: str) -> float:
-        n1, n2 = self._neighbors[id1], self._neighbors[id2]
-        return self._jaccard(n1 | {id1}, n2 | {id2}) if (n1 or n2) else 0.0
-
-    def _lexical_score(self, id1: str, id2: str) -> float:
-        return self._jaccard(set(self._stems[id1]), set(self._stems[id2]))
+        """
+        Общие горизонтальные связи (Жаккар по замкнутым окрестностям). Общие предки из окрестностей
+        исключаются: они уже учтены иерархией, и считать их дважды нельзя.
+        """
+        shared_anc = set(self._up(id1, "all")) & set(self._up(id2, "all")) - {id1, id2}
+        n1 = (self._neighbors[id1] - shared_anc) | {id1}
+        n2 = (self._neighbors[id2] - shared_anc) | {id2}
+        if len(n1) == 1 and len(n2) == 1:
+            return 0.0
+        return self._jaccard(n1, n2)
 
     def _score(self, id1: str, id2: str) -> Tuple[float, Dict[str, float]]:
         h, _, _ = self._hierarchy_score(id1, id2)
-        ctx, lex = self._context_score(id1, id2), self._lexical_score(id1, id2)
-        total = W_HIERARCHY * h + W_CONTEXT * ctx + W_LEXICAL * lex
-        parts = {"hierarchy": round(h, 3), "context": round(ctx, 3), "lexical": round(lex, 3)}
-        return round(min(total, 1.0), 3), parts
+        ctx = self._context_score(id1, id2)
+        total = h + CONTEXT_BONUS * ctx * (1 - h)
+        return round(min(total, 1.0), 3), {"hierarchy": round(h, 3), "context": round(ctx, 3)}
 
     # ------------------------------------------------------------------ вспомогательное для карточки
-    def _direct_links(self, id1: str, id2: str) -> List[Dict[str, str]]:
+    def _direct_links(self, id1: str, id2: str, horizontal_only: bool = False) -> List[Dict[str, str]]:
         links = []
         for a, b in ((id1, id2), (id2, id1)):
             key = self._edge_labels.get((a, b))
-            if key is not None:
+            if key is not None and not (horizontal_only and self._is_structural_key(key)):
                 links.append({
                     "from_id": a, "from_term": self._term(a), "relation": key,
                     "to_id": b, "to_term": self._term(b),
@@ -378,18 +361,50 @@ class ComparatorSolver:
                     queue.append((nb, d + 1))
         return None
 
-    def _distinctive_words(self, id1: str, id2: str, limit: int = 6) -> List[str]:
-        """Слова определения id1, которых нет у id2; редкие по базе — первыми (они информативнее)."""
-        s1, s2 = self._stems[id1], self._stems[id2]
-        own = [(self._df.get(s, 1), -len(w), w) for s, w in s1.items() if s not in s2]
-        own.sort()
-        return [w for _, _, w in own[:limit]]
+    @staticmethod
+    def _is_structural_key(key: str) -> bool:
+        k = str(key).strip().lower()
+        return k in STRUCTURAL_KEYS or k.startswith(ISA_CHILD_PREFIX)
 
-    def _shared_words(self, id1: str, id2: str, limit: int = 6) -> List[str]:
-        s1, s2 = self._stems[id1], self._stems[id2]
-        common = [(self._df.get(s, 1), -len(s1[s]), s1[s]) for s in s1 if s in s2]
-        common.sort()
-        return [w for _, _, w in common[:limit]]
+    @classmethod
+    def _is_hierarchy_key(cls, key: str) -> bool:
+        return cls._is_structural_key(key) or str(key).strip().lower() in CONTRAST_KEYS
+
+    def _characteristics(self, cid: str) -> Dict[str, List[str]]:
+        """
+        Характеристики понятия: {вид: [значения]} из его связей, кроме иерархических и
+        свободного текста. Значение-ID заменяется термином, текстовое остаётся как есть.
+        """
+        out: Dict[str, List[str]] = {}
+        for key, targets in (self._concepts[cid].get("relations") or {}).items():
+            if self._is_hierarchy_key(key) or str(key).strip().lower() in FREE_TEXT_KEYS:
+                continue
+            values = [self._term(t) if t in self._concepts else str(t) for t in targets]
+            if values:
+                out[key] = values
+        return out
+
+    def _characteristics_matrix(self, id1: str, id2: str) -> List[Dict[str, Any]]:
+        """Матрица общих и уникальных характеристик: по строке на вид характеристики."""
+        c1, c2 = self._characteristics(id1), self._characteristics(id2)
+        rows = []
+        for key in list(c1) + [k for k in c2 if k not in c1]:
+            v1, v2 = c1.get(key, []), c2.get(key, [])
+            shared = [v for v in v1 if v in v2]
+            if v1 and v2:
+                status = "common" if set(v1) == set(v2) else ("partly" if shared else "different")
+            else:
+                status = "only_1" if v1 else "only_2"
+            rows.append({"name": key, "values_1": v1, "values_2": v2, "shared": shared, "status": status})
+        return rows
+
+    def _inherited(self, common_ancestors: List[str]) -> List[Dict[str, Any]]:
+        """Характеристики общих предков (от нижнего к верхнему): оба понятия наследуют их."""
+        rows = []
+        for anc in common_ancestors:
+            for key, values in self._characteristics(anc).items():
+                rows.append({"from_id": anc, "from_term": self._term(anc), "name": key, "values": values})
+        return rows[:MAX_INHERITED]
 
     def _terms(self, ids: List[str]) -> List[str]:
         return [self._term(i) for i in ids]
@@ -421,8 +436,8 @@ class ComparatorSolver:
             "superclasses": self._terms(parents),
             "subclasses": self._terms(subclasses)[:8],
             "parts": self._terms(parts)[:8],
+            "explanation": " ".join((c.get("relations") or {}).get("пояснение", [])),
             "branch_to_lca": branch,
-            "distinctive_words": self._distinctive_words(cid, other),
         }
 
     # ------------------------------------------------------------------ ошибки поиска
@@ -487,13 +502,16 @@ class ComparatorSolver:
         lca_id = lca_info["lca"] if lca_info else None
         direct = self._direct_links(id1, id2)
         contrast = [l for l in direct if str(l["relation"]).lower() in CONTRAST_KEYS]
-        shared_nb = sorted((self._neighbors[id1] & self._neighbors[id2]) - {id1, id2})
-        keys1 = {k for k in (self._concepts[id1].get("relations") or {}) if k not in IGNORED_SHARED_KEYS}
-        keys2 = {k for k in (self._concepts[id2].get("relations") or {}) if k not in IGNORED_SHARED_KEYS}
+        # общие предки уже показаны как род/путь — в горизонтальных связях их не дублируем
+        shared_nb = sorted((self._neighbors[id1] & self._neighbors[id2]) - {id1, id2} - set(
+            (lca_info or {}).get("common", [])))
+        link_path = self._shortest_link_path(id1, id2) if relationship == "linked" else None
 
         same_topic = self._concepts[id1].get("topic_id") == self._concepts[id2].get("topic_id")
         labs = sorted(set(self._labs(id1)) | set(self._labs(id2)))
         order = self._study_order(id1, id2, lca_id, relationship)
+        matrix = self._characteristics_matrix(id1, id2)
+        common_anc = lca_info["common"] if lca_info else []
 
         result: Dict[str, Any] = {
             "status": "success",
@@ -512,18 +530,28 @@ class ComparatorSolver:
             "relation": headline if relationship in ("ancestor", "descendant", "part_whole") else None,
             "path": path,
             "path_text": self._path_text(path),
+            "path_1": self._path_down(lca_id, id1, lca_info["layer"]) if lca_info else [],
+            "path_2": self._path_down(lca_id, id2, lca_info["layer"]) if lca_info else [],
+            "genus": ({"concept_id": lca_id, "term": self._term(lca_id),
+                       "definition": self._concepts[lca_id].get("definition", "")} if isa else None),
             "common_ancestors": [
                 {"concept_id": a, "term": self._term(a),
                  "distance_to_c1": self._up(id1, lca_info["layer"])[a][0],
                  "distance_to_c2": self._up(id2, lca_info["layer"])[a][0]}
-                for a in (lca_info["common"] if lca_info else [])
+                for a in common_anc
             ],
+            "characteristics": matrix,
+            "inherited": self._inherited(common_anc) if isa else [],
             "common": {
                 "same_topic": same_topic,
                 "topic_id": self._concepts[id1].get("topic_id") if same_topic else None,
-                "relation_types": sorted(keys1 & keys2),
+                "shared_characteristics": [{"name": r["name"], "values": r["shared"]} for r in matrix if r["shared"]],
                 "linked_concepts": [{"concept_id": n, "term": self._term(n)} for n in shared_nb[:8]],
-                "keywords": self._shared_words(id1, id2),
+            },
+            "horizontal": {
+                "direct_links": self._direct_links(id1, id2, horizontal_only=True),
+                "shared_links": [{"concept_id": n, "term": self._term(n)} for n in shared_nb[:8]],
+                "link_path": [{"concept_id": c, "term": self._term(c)} for c in link_path] if link_path else [],
             },
             "differences": {
                 "concept_1": self._profile(id1, id2, lca_id if isa else None),
@@ -536,6 +564,10 @@ class ComparatorSolver:
         result["tip"] = self._tip(result)
         result["message"] = self._message(result, headline)
         return result
+
+    def _path_down(self, lca: str, cid: str, layer: str) -> List[Dict[str, str]]:
+        """Путь от общего предка вниз до понятия: [LCA, …, cid]."""
+        return [{"concept_id": c, "term": self._term(c)} for c in self._path_up(cid, lca, layer)[::-1]]
 
     # --- классификация родства -------------------------------------------------------------
     def _classify(self, id1, id2, isa, union) -> Tuple[str, str, List[Dict[str, str]]]:
@@ -560,6 +592,7 @@ class ComparatorSolver:
             if lca == id2:
                 return "part_whole", f"{l1} входит в {l2} (часть — целое)", path
             return "common_whole", f"{l1} и {l2} — разные элементы одного целого {self._label(lca)}", path
+        no_tax = f"Таксономического родства между {l1} и {l2} в базе знаний нет"
         link = self._shortest_link_path(id1, id2)
         if link:
             path = [{"concept_id": c, "term": self._term(c),
@@ -567,13 +600,10 @@ class ComparatorSolver:
                      "edge": None} for i, c in enumerate(link)]
             hops = len(link) - 1
             how = "напрямую связаны" if hops == 1 else f"связаны через цепочку из {hops} связей"
-            return "linked", f"{l1} и {l2} не лежат в одной иерархии, но {how}", path
-        if self._lexical_score(id1, id2) >= 0.2 and len(self._shared_words(id1, id2)) >= 2:
-            return "text_similar", (f"{l1} и {l2} не связаны в иерархии, но их определения "
-                                    "похожи по смыслу (общие ключевые слова)"), []
+            return "linked", f"{no_tax}, но по горизонтальным связям они {how}", path
         if self._concepts[id1].get("topic_id") == self._concepts[id2].get("topic_id"):
-            return "same_topic", f"{l1} и {l2} изучаются в одном разделе, но явных связей между ними нет", []
-        return "unrelated", f"{l1} и {l2} в базе знаний не связаны", []
+            return "same_topic", f"{no_tax}; горизонтальных связей тоже нет, но понятия изучаются в одном разделе", []
+        return "unrelated", f"{no_tax}, горизонтальных связей между ними тоже нет — сравнивайте по определениям", []
 
     def _build_path(self, id1: str, id2: str, lca: str, layer: str) -> List[Dict[str, str]]:
         up1 = self._path_up(id1, lca, layer)           # id1 … lca
@@ -626,31 +656,29 @@ class ComparatorSolver:
         return [{"concept_id": c, "term": self._term(c)} for c in seq]
 
     def _tip(self, r: Dict[str, Any]) -> str:
-        """Совет «как не перепутать»."""
-        d1, d2 = r["differences"]["concept_1"], r["differences"]["concept_2"]
+        """Совет «как не перепутать»: опирается на род и на строки матрицы характеристик."""
         t1, t2 = self._label(r["concept_id_1"]), self._label(r["concept_id_2"])
-        w1, w2 = d1["distinctive_words"][:3], d2["distinctive_words"][:3]
         rel = r["relationship"]
         if r["contrasted"]:
             base = f"В базе знаний {t1} и {t2} прямо противопоставлены — запомните, чем именно они различаются."
         elif rel == "siblings":
-            base = f"Не путайте: {t1} и {t2} — разные виды {self._label(r['lca_id'])}."
+            base = f"Не путайте: {t1} и {t2} — разные виды {self._label(r['lca_id'])}; общий род у них один, отличаются определением."
         elif rel in ("ancestor", "descendant"):
             gen, spec = (t1, t2) if rel == "ancestor" else (t2, t1)
-            base = f"{spec} наследует свойства {gen}, но имеет собственные особенности."
+            base = f"{spec} — частный случай {gen}: наследует его характеристики и добавляет собственные."
         elif rel == "cousins":
             base = f"Сначала разберитесь с общей веткой {self._label(r['lca_id'])}, затем с различиями."
         elif rel in ("part_whole", "common_whole"):
             base = "Это разные уровни/элементы одного целого — не смешивайте часть и целое."
-        elif rel == "text_similar":
-            base = "Явной связи в иерархии нет — сравнивайте понятия по определениям и примерам."
         else:
-            base = "Понятия лежат в разных областях знаний; сравнивайте их по определениям."
+            base = "Таксономической связи нет — сравнивайте понятия по определениям, характеристикам и общим связям."
+        diff = [row["name"] for row in r["characteristics"] if row["status"] in ("different", "partly")]
+        only = [row["name"] for row in r["characteristics"] if row["status"] in ("only_1", "only_2")]
         extra = []
-        if w1:
-            extra.append(f"для {t1} характерно: {', '.join(w1)}")
-        if w2:
-            extra.append(f"для {t2} характерно: {', '.join(w2)}")
+        if diff:
+            extra.append("характеристики, по которым они различаются: " + ", ".join(diff))
+        if only:
+            extra.append("описаны только у одного из них: " + ", ".join(only))
         return base + (" (" + "; ".join(extra) + ")" if extra else "")
 
     def _message(self, r: Dict[str, Any], headline: str) -> str:

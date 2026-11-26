@@ -1,4 +1,4 @@
-"""Сценарий 6. Сравнение двух понятий: чем отличаются, что общего, в каком порядке учить."""
+"""Сценарий 6. Семантическое сравнение понятий: общий род, видовые отличия, матрица характеристик."""
 import streamlit as st
 from ui_common import call, concept_label, concept_options, get_router, show_error, show_warnings, show_router_debug
 
@@ -10,13 +10,18 @@ RELATION_TITLES = {
     "cousins": "Одна ветка иерархии",
     "part_whole": "Часть — целое",
     "common_whole": "Элементы одного целого",
-    "linked": "Связаны по смыслу",
-    "text_similar": "Похожие определения",
+    "linked": "Нет таксономии, есть горизонтальные связи",
     "same_topic": "Один раздел, явных связей нет",
     "unrelated": "В базе знаний не связаны",
 }
+STATUS_TITLES = {
+    "common": "✅ общее",
+    "partly": "🟡 частично общее",
+    "different": "🔀 различается",
+    "only_1": "◀ только у первого",
+    "only_2": "▶ только у второго",
+}
 ROLE_ICON = {"lca": "🔶", "start": "🟦", "end": "🟦", "up": "▫️", "down": "▫️", "via": "▫️"}
-
 
 
 def _homonyms() -> set:
@@ -38,10 +43,14 @@ def picker(label: str, key: str, index: int = 0) -> str:
     return st.selectbox(label, concept_options(), index=index, key=key, format_func=pick_label)
 
 
+def _chain(nodes) -> str:
+    return " → ".join(f"**{n['term']}** `[{n['concept_id']}]`" for n in nodes)
+
+
 st.title("Сравнение двух понятий")
 st.caption(
-    "Чем отличаются два понятия курса: тип родства, ближайший общий предок (LCA) и путь через него, "
-    "общее, различия, явные противопоставления и порядок изучения. "
+    "Что объединяет два понятия (общий предок и его определение — «род»), чем каждое отличается "
+    "(определение и характеристики), что оба наследуют от предка и как их лучше изучать. "
     "Если у термина два ID (теория и лабораторный практикум), выберите нужный в списке."
 )
 
@@ -63,7 +72,7 @@ if st.button("Сравнить", type="primary", use_container_width=True):
         st.info(data["message"].split("\nБлизость")[0])
 
         if data["status"] == "identical":
-            st.caption("Выберите два разных понятия, чтобы увидеть сходства и различия.")
+            st.caption("Уникальных характеристик нет. Выберите два разных понятия.")
             show_router_debug(resp)
             st.stop()
 
@@ -76,34 +85,35 @@ if st.button("Сравнить", type="primary", use_container_width=True):
         m2.metric("Близость", f"{data['semantic_similarity']:.2f}", data["similarity_level"], delta_color="off")
         m3.metric("Шагов от 1-го до LCA", data["distance_1"] if data["lca_id"] else "—")
         m4.metric("Шагов от 2-го до LCA", data["distance_2"] if data["lca_id"] else "—")
-
-        with st.expander("Из чего складывается близость"):
+        with st.expander("Как считается близость"):
             p = data["similarity_parts"]
             st.table([
-                {"Составляющая": "Иерархия (Ву–Палмер)", "Значение": p["hierarchy"], "Вес": 0.6},
-                {"Составляющая": "Общие связи", "Значение": p["context"], "Вес": 0.2},
-                {"Составляющая": "Общие слова определений", "Значение": p["lexical"], "Вес": 0.2},
+                {"Составляющая": "Иерархия (Ву–Палмер)", "Значение": p["hierarchy"]},
+                {"Составляющая": "Общие горизонтальные связи", "Значение": p["context"]},
             ])
-            st.caption("Итог = 0.6·иерархия + 0.2·связи + 0.2·лексика. Ву–Палмер по is-a: "
-                       f"{data['wu_palmer']}.")
+            st.caption("Основа — мера Ву–Палмера по иерархии. Общие горизонтальные связи только повышают "
+                       "близость (до 30% оставшегося до 1.0), но не снижают её.")
 
-        # --- путь
-        if data["path"]:
-            st.markdown("#### Путь по иерархии")
-            st.markdown(" ".join(
-                f"{ROLE_ICON.get(n['role'], '')} **{n['term']}** `[{n['concept_id']}]`"
-                for n in data["path"]
-            ))
-            st.caption(data["path_text"] + "   (стрелка идёт от потомка к предку; 🔶 — общий предок)")
+        # --- род и пути
+        if data["genus"] and data["genus"]["definition"]:
+            st.markdown("#### Общий род")
+            st.success(f"**{data['genus']['term']}** — {data['genus']['definition']}")
+        if data["path_1"] and data["path_2"]:
+            st.markdown("#### Путь от общего предка до каждого понятия")
+            st.markdown(f"**1:** {_chain(data['path_1'])}")
+            st.markdown(f"**2:** {_chain(data['path_2'])}")
+        elif data["path"]:
+            st.markdown("#### Цепочка связей")
+            st.markdown(" — ".join(f"**{n['term']}** `[{n['concept_id']}]`" for n in data["path"]))
 
-        # --- сравнительная таблица
+        # --- видовое отличие: определения рядом
         d1, d2 = data["differences"]["concept_1"], data["differences"]["concept_2"]
-        t1 = pick_label(d1["concept_id"])
-        t2 = pick_label(d2["concept_id"])
-        st.markdown("#### Сравнительная таблица")
+        t1, t2 = pick_label(d1["concept_id"]), pick_label(d2["concept_id"])
+        st.markdown("#### Чем отличаются")
         rows = [
             ("Раздел курса", f"{d1['topic_id']} — {d1['topic_title']}", f"{d2['topic_id']} — {d2['topic_title']}"),
             ("Определение", d1["definition"], d2["definition"]),
+            ("Пояснение", d1["explanation"], d2["explanation"]),
             ("Надкласс", ", ".join(d1["superclasses"]), ", ".join(d2["superclasses"])),
             ("Подклассы", ", ".join(d1["subclasses"]), ", ".join(d2["subclasses"])),
             ("Состоит из", ", ".join(d1["parts"]), ", ".join(d2["parts"])),
@@ -114,43 +124,39 @@ if st.button("Сравнить", type="primary", use_container_width=True):
             for name, a, b in rows if a or b or name in ("Раздел курса", "Определение")
         ])
 
-        # --- общее
-        st.markdown("#### Что общего")
+        # --- матрица характеристик
+        st.markdown("#### Матрица характеристик")
+        if data["characteristics"]:
+            st.table([
+                {
+                    "Характеристика": r["name"],
+                    "Статус": STATUS_TITLES[r["status"]],
+                    t1: "; ".join(r["values_1"]) or "—",
+                    t2: "; ".join(r["values_2"]) or "—",
+                }
+                for r in data["characteristics"]
+            ])
+        else:
+            st.caption("В базе знаний у этих понятий не заданы структурные характеристики — "
+                       "сравнивайте по определениям выше.")
+        if data["inherited"]:
+            st.markdown("**Оба наследуют от общих предков:**")
+            for r in data["inherited"]:
+                st.markdown(f"- **{r['name']}** (от «{r['from_term']}»): {'; '.join(r['values'])}")
+
+        # --- горизонтальные связи
+        hor = data["horizontal"]
+        if hor["direct_links"] or hor["shared_links"] or len(hor["link_path"]) > 2:
+            st.markdown("#### Горизонтальные связи")
+            for link in hor["direct_links"]:
+                st.markdown(f"- «{link['from_term']}» —**{link['relation']}**→ «{link['to_term']}»")
+            if hor["shared_links"]:
+                st.markdown("- общие связанные понятия: " + ", ".join(x["term"] for x in hor["shared_links"]))
+            if len(hor["link_path"]) > 2:
+                st.markdown("- цепочка: " + " — ".join(x["term"] for x in hor["link_path"]))
         com = data["common"]
-        shown = False
         if com["same_topic"]:
-            shown = True
-            st.success(f"**Один раздел:** {com['topic_id']}")
-        anc = data["common_ancestors"]
-        if anc and data["relationship"] in ("siblings", "cousins", "common_whole"):
-            shown = True
-            st.success("**Общие предки:** " + ", ".join(a["term"] for a in anc))
-        if com["relation_types"]:
-            shown = True
-            st.success("**Описаны через одинаковые отношения:** " + ", ".join(com["relation_types"]))
-        if com["linked_concepts"]:
-            shown = True
-            st.success("**Общие связанные понятия:** " + ", ".join(c["term"] for c in com["linked_concepts"]))
-        if com["keywords"]:
-            shown = True
-            st.success("**Общие слова определений:** " + ", ".join(com["keywords"]))
-        if not shown:
-            st.caption("Явного сходства в базе знаний не найдено.")
-
-        # --- различия
-        st.markdown("#### В чём различия")
-        c_left, c_right = st.columns(2)
-        for col, d in ((c_left, d1), (c_right, d2)):
-            with col:
-                st.markdown(f"**Только у «{d['term']}»:**")
-                if d["distinctive_words"]:
-                    for w in d["distinctive_words"]:
-                        st.markdown(f"- {w}")
-                else:
-                    st.caption("Отличительных слов в определении нет.")
-
-        for link in data["direct_links"]:
-            st.caption(f"Прямая связь в БЗ: «{link['from_term']}» —{link['relation']}→ «{link['to_term']}»")
+            st.caption(f"Оба понятия относятся к разделу {com['topic_id']}.")
 
         # --- как учить
         st.markdown("#### Как не перепутать")
@@ -160,8 +166,8 @@ if st.button("Сравнить", type="primary", use_container_width=True):
         if study["labs"]:
             st.markdown("**Лабораторные работы:** " + ", ".join(study["labs"]))
 
-        if len(anc) > 1:
-            with st.expander(f"Все общие предки ({len(anc)})"):
-                st.table(anc)
+        if len(data["common_ancestors"]) > 1:
+            with st.expander(f"Все общие предки ({len(data['common_ancestors'])})"):
+                st.table(data["common_ancestors"])
 
         show_router_debug(resp)
